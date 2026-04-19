@@ -32,6 +32,7 @@ export default function App() {
   const [editBookModal, setEditBookModal] = useState<any>(null);
   const [editMemberModal, setEditMemberModal] = useState<any>(null);
   const [viewUserModal, setViewUserModal] = useState<any>(null);
+  const [genMemberId, setGenMemberId] = useState("");
 
   // Issue/Return States
   const [issueSearchVal, setIssueSearchVal] = useState("");
@@ -249,9 +250,15 @@ export default function App() {
     else {
       alert("Member registered");
       form.reset();
+      setGenMemberId("");
       loadMembers();
       loadDashboard();
     }
+  };
+
+  const generateRandomId = () => {
+    const id = Math.floor(10000 + Math.random() * 90000).toString();
+    setGenMemberId(id);
   };
 
   const deleteMember = async (id: string) => {
@@ -500,8 +507,8 @@ export default function App() {
                 <input name="name" placeholder="Full Name" required className="input-field" />
                 <input name="phone" placeholder="Phone" required className="input-field" />
                 <input name="address" placeholder="Address" required className="input-field" />
-                <input name="email" placeholder="Email" className="input-field" />
                 <input name="pincode" placeholder="Pincode" className="input-field" />
+                <input name="email" placeholder="Email" className="input-field" />
                 <select name="gender" className="input-field">
                   <option value="">Select Gender</option>
                   <option value="Male">MALE</option>
@@ -509,9 +516,24 @@ export default function App() {
                   <option value="Others">OTHERS</option>
                 </select>
                 <input name="dob" type="date" className="input-field" />
-                <input name="member_id" placeholder="ID" className="input-field" />
+                <div className="flex gap-2">
+                  <input 
+                    name="member_id" 
+                    placeholder="ID" 
+                    value={genMemberId}
+                    onChange={(e) => setGenMemberId(e.target.value)}
+                    className="input-field flex-1" 
+                  />
+                  <button 
+                    type="button" 
+                    onClick={generateRandomId}
+                    className="bg-accent text-white px-3 rounded-xl text-[10px] font-bold hover:bg-accent/90 transition-all uppercase whitespace-nowrap"
+                  >
+                    Get ID
+                  </button>
+                </div>
                 <input name="occupation" placeholder="Occupation" className="input-field" />
-                <input name="notes" placeholder="Notes" className="input-field" />
+                <textarea name="notes" placeholder="Notes (Optional)" className="input-field h-24" />
                 <button type="submit" className="btn-primary w-full mt-2">Create Profile</button>
               </form>
             </div>
@@ -627,9 +649,22 @@ export default function App() {
               <input name="title" placeholder="Full Title" required className="input-field shadow-sm col-span-full" />
               <input name="author" placeholder="Author Name" required className="input-field shadow-sm" />
               <input name="publisher" placeholder="Publisher" className="input-field shadow-sm" />
-              <input name="language" placeholder="Language" className="input-field shadow-sm" />
+              <select name="language" className="input-field shadow-sm">
+                <option value="">Select Language</option>
+                <option value="MALAYALAM">MALAYALAM</option>
+                <option value="ENGLISH">ENGLISH</option>
+                <option value="HINDI">HINDI</option>
+                <option value="TAMIL">TAMIL</option>
+                <option value="SANSKRIT">SANSKRIT</option>
+                <option value="OTHER">OTHER</option>
+              </select>
               <input name="category" placeholder="Category" className="input-field shadow-sm" />
-              <input name="shelfnumber" placeholder="Storage Shelf" className="input-field shadow-sm" />
+              <select name="shelfnumber" className="input-field shadow-sm">
+                <option value="">Select Shelf (1-30)</option>
+                {Array.from({ length: 30 }, (_, i) => (
+                  <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
+                ))}
+              </select>
               <input name="price" placeholder="Price" className="input-field shadow-sm" />
               <button type="submit" className="btn-primary py-3 col-span-full uppercase tracking-widest text-[11px] font-black">Initialize Asset Registry</button>
             </form>
@@ -905,9 +940,22 @@ export default function App() {
               <input name="title" defaultValue={editBookModal.title} placeholder="Full Title" className="input-field" />
               <input name="author" defaultValue={editBookModal.author} placeholder="Author" className="input-field" />
               <input name="publisher" defaultValue={editBookModal.publisher} placeholder="Publisher" className="input-field" />
-              <input name="language" defaultValue={editBookModal.language} placeholder="Language" className="input-field" />
+              <select name="language" defaultValue={editBookModal.language} className="input-field">
+                <option value="">Select Language</option>
+                <option value="MALAYALAM">MALAYALAM</option>
+                <option value="ENGLISH">ENGLISH</option>
+                <option value="HINDI">HINDI</option>
+                <option value="TAMIL">TAMIL</option>
+                <option value="SANSKRIT">SANSKRIT</option>
+                <option value="OTHER">OTHER</option>
+              </select>
               <input name="category" defaultValue={editBookModal.category} placeholder="Category" className="input-field" />
-              <input name="shelfnumber" defaultValue={editBookModal.shelfnumber} placeholder="Storage Shelf" className="input-field" />
+              <select name="shelfnumber" defaultValue={editBookModal.shelfnumber} className="input-field">
+                <option value="">Select Shelf (1-30)</option>
+                {Array.from({ length: 30 }, (_, i) => (
+                  <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
+                ))}
+              </select>
               <input name="price" defaultValue={editBookModal.price} placeholder="Price" className="input-field" />
               <div className="flex gap-3 pt-4">
                 <button type="submit" className="flex-1 btn-primary py-3">Commit Changes</button>
@@ -929,8 +977,8 @@ export default function App() {
               <input name="name" defaultValue={editMemberModal.name} placeholder="Full Name" className="input-field" />
               <input name="phone" defaultValue={editMemberModal.phone} placeholder="Phone" className="input-field" />
               <input name="address" defaultValue={editMemberModal.address} placeholder="Address" className="input-field" />
-              <input name="email" defaultValue={editMemberModal.email} placeholder="Email" className="input-field" />
               <input name="pincode" defaultValue={editMemberModal.pincode} placeholder="Pincode" className="input-field" />
+              <input name="email" defaultValue={editMemberModal.email} placeholder="Email" className="input-field" />
               <select name="gender" defaultValue={editMemberModal.gender} className="bg-slate-100 border border-surface-border px-3 py-3 rounded-xl text-xs font-bold w-full uppercase outline-none">
                 <option value="">Select Gender</option>
                 <option value="Male">MALE</option>
@@ -940,7 +988,7 @@ export default function App() {
               <input name="dob" defaultValue={editMemberModal.dob} type="date" className="input-field" />
               <input name="member_id" defaultValue={editMemberModal.member_id} placeholder="Membership ID" className="input-field" />
               <input name="occupation" defaultValue={editMemberModal.occupation} placeholder="Occupation" className="input-field" />
-              <textarea name="notes" defaultValue={editMemberModal.notes} placeholder="Additional Metadata" className="input-field h-24" />
+              <textarea name="notes" defaultValue={editMemberModal.notes} placeholder="Notes (Optional)" className="input-field h-24" />
               <div className="flex gap-3 pt-4">
                 <button type="submit" className="flex-1 btn-primary py-3">Validate Profile</button>
                 <button type="button" onClick={() => setEditMemberModal(null)} className="flex-1 bg-slate-100 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-200 uppercase tracking-widest transition-all">Dismiss</button>
