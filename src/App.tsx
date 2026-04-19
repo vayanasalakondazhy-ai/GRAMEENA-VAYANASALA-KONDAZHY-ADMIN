@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { useEffect, useState, useCallback, useRef, FormEvent } from "react";
 import Swal from "sweetalert2";
 import { GoogleGenAI, Type } from "@google/genai";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, LineChart, Line, Legend 
@@ -42,6 +43,13 @@ export default function App() {
   const [genMemberId, setGenMemberId] = useState("");
   const [borrowingLimit, setBorrowingLimit] = useState(3);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [addMode, setAddMode] = useState<"manual" | "barcode">("manual");
+  const [isbnLookup, setIsbnLookup] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [scannedBook, setScannedBook] = useState<any>(null);
+  const [showCamera, setShowCamera] = useState(false);
+  const addFormRef = useRef<HTMLFormElement>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
 
   // Issue/Return States
   const [issueSearchVal, setIssueSearchVal] = useState("");
@@ -424,6 +432,131 @@ export default function App() {
       alert("Updated");
       setEditMemberModal(null);
       loadMembers();
+    }
+  };
+
+  const lookupISBN = async (e?: FormEvent, manualIsbn?: string) => {
+    if (e) e.preventDefault();
+    const targetIsbn = manualIsbn || isbnLookup;
+    if (!targetIsbn.trim()) return Swal.fire("Input Required", "Please enter/scan an ISBN barcode.", "warning");
+
+    setLookupLoading(true);
+    setScannedBook(null);
+    try {
+      // Using Google Books API (Free, no key required for simple lookups)
+      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${targetIsbn.trim()}`);
+      const data = await res.json();
+
+      if (!data.items || data.items.length === 0) {
+        throw new Error("No book found for this ISBN.");
+      }
+
+      const info = data.items[0].volumeInfo;
+      const authors = info.authors ? info.authors.join(", ") : "Unknown";
+      
+      const newBookData = {
+        title: info.title || "",
+        author: authors,
+        publisher: info.publisher || "",
+        category: info.categories ? info.categories[0] : "",
+        language: (info.language || "en").toUpperCase(),
+        price: "", // API usually doesn't provide library prices
+        stocknumber: "", // Needs manual entry
+        callnumber: "", // Needs manual entry
+        shelfnumber: "" // Needs manual entry
+      };
+
+      setScannedBook(newBookData);
+      setShowCamera(false); // Close camera if open
+      Swal.fire({
+        icon: 'success',
+        title: 'Book Identified!',
+        text: `${info.title} by ${authors}`,
+        timer: 2000,
+        showConfirmButton: false
+      });
+    } catch (err: any) {
+      Swal.fire("Lookup Failed", err.message || "Could not retrieve book details.", "error");
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
+  const startCameraScanner = async () => {
+    setShowCamera(true);
+    // Increased delay and simplified config to prevent blank screen
+    setTimeout(async () => {
+      try {
+        const container = document.getElementById("reader");
+        if (!container) throw new Error("Scanner container not found in DOM.");
+
+        const html5QrCode = new Html5Qrcode("reader");
+        scannerRef.current = html5QrCode;
+        
+        const config = { 
+          fps: 15, 
+          qrbox: { width: 280, height: 150 }, 
+          // Removed strict aspect ratio to allow browser default
+        };
+
+        await html5QrCode.start(
+          { facingMode: "environment" }, 
+          config, 
+          (decodedText) => {
+            html5QrCode.stop().then(() => {
+              lookupISBN(undefined, decodedText);
+              setShowCamera(false);
+            }).catch(e => console.error("Stop error:", e));
+          },
+          () => {}
+        );
+      } catch (err) {
+        console.error("Camera Init Error:", err);
+        setShowCamera(false);
+        Swal.fire({
+          icon: 'error',
+          title: 'Camera Connection Failed',
+          text: 'Unable to attach video stream. Please ensure your camera is not being used by another app and check permissions.',
+          confirmButtonText: 'Try Again'
+        });
+      }
+    }, 500);
+  };
+
+  const stopCameraScanner = async () => {
+    if (scannerRef.current) {
+      try {
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
+        }
+      } catch (err) {
+        console.error("Stop Error:", err);
+      }
+      scannerRef.current = null;
+    }
+    setShowCamera(false);
+  };
+
+  const confirmAddScannedBook = async (e: FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const bookData = Object.fromEntries(formData.entries());
+
+    const { error } = await supabase.from("books").insert([bookData]);
+    if (error) {
+      Swal.fire("Database Error", error.message, "error");
+    } else {
+      Swal.fire({
+        icon: 'success',
+        title: 'Registry Updated!',
+        text: 'The asset has been successfully recorded in Supabase.',
+        timer: 2000,
+        showConfirmButton: false
+      });
+      setScannedBook(null);
+      setIsbnLookup("");
+      loadDashboard();
     }
   };
 
@@ -839,41 +972,168 @@ export default function App() {
 
         {/* ADD BOOK */}
         {activeTab === "addBook" && (
-          <div className="max-w-2xl section-card">
-            <div className="section-header flex justify-between items-center">
-              <h2>Register New Library Asset</h2>
-              <div className="flex gap-2">
-                <label className="btn-primary bg-slate-800 text-[10px] px-3 py-1.5 cursor-pointer flex items-center gap-1">
-                  <span>📥 BULK CSV</span>
-                  <input type="file" accept=".csv" onChange={bulkUpload} className="hidden" />
-                </label>
-              </div>
+          <div className="max-w-2xl mx-auto flex flex-col gap-6">
+            <div className="section-card p-2 flex bg-slate-100 rounded-2xl">
+              <button 
+                onClick={() => setAddMode('manual')}
+                className={`flex-1 py-3 px-6 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${
+                  addMode === 'manual' ? 'bg-white shadow-md text-primary scale-105' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Manual Entry
+              </button>
+              <button 
+                onClick={() => { setAddMode('barcode'); setScannedBook(null); }}
+                className={`flex-1 py-3 px-6 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${
+                  addMode === 'barcode' ? 'bg-white shadow-md text-accent scale-105' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Barcode Scanner
+              </button>
             </div>
-            <form onSubmit={addBook} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <input name="stocknumber" placeholder="Stock Number" required className="input-field shadow-sm" />
-              <input name="callnumber" placeholder="Call Number" required className="input-field shadow-sm" />
-              <input name="title" placeholder="Full Title" required className="input-field shadow-sm col-span-full" />
-              <input name="author" placeholder="Author Name" required className="input-field shadow-sm" />
-              <input name="publisher" placeholder="Publisher" className="input-field shadow-sm" />
-              <input name="category" placeholder="Category" className="input-field shadow-sm col-span-full" />
-              <select name="language" className="input-field shadow-sm">
-                <option value="">Select Language</option>
-                <option value="MALAYALAM">MALAYALAM</option>
-                <option value="ENGLISH">ENGLISH</option>
-                <option value="HINDI">HINDI</option>
-                <option value="TAMIL">TAMIL</option>
-                <option value="SANSKRIT">SANSKRIT</option>
-                <option value="OTHER">OTHER</option>
-              </select>
-              <select name="shelfnumber" className="input-field shadow-sm">
-                <option value="">Select Shelf (1-30)</option>
-                {Array.from({ length: 30 }, (_, i) => (
-                  <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
-                ))}
-              </select>
-              <input name="price" placeholder="Price" className="input-field shadow-sm col-span-full" />
-              <button type="submit" className="btn-primary py-4 col-span-full uppercase tracking-widest text-[11px] font-black shadow-lg shadow-primary/20">Initialize Asset Registry</button>
-            </form>
+
+            {addMode === 'barcode' && !scannedBook && (
+              <div className="section-card p-12 flex flex-col items-center justify-center text-center animate-in fade-in slide-in-from-bottom-4">
+                <div className="w-24 h-24 bg-accent/10 text-accent rounded-3xl flex items-center justify-center text-4xl mb-6 animate-pulse">
+                  🧾
+                </div>
+                <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Ready for Scanning</h3>
+                <p className="text-xs text-text-muted mt-2 max-w-xs mx-auto leading-relaxed">
+                  Focus your scanner on the book's 13-digit ISBN barcode or use your device's camera.
+                </p>
+
+                {showCamera ? (
+                  <div className="w-full max-w-md mt-6 relative group flex flex-col items-center">
+                    <div id="reader" className="w-full overflow-hidden rounded-xl border-4 border-accent shadow-2xl bg-slate-900 min-h-[250px]"></div>
+                    <div className="absolute top-[20%] left-0 right-0 pointer-events-none flex items-center justify-center">
+                      <div className="w-3/4 h-24 border-2 border-accent/50 rounded-lg animate-pulse shadow-[0_0_15px_rgba(59,130,246,0.5)]"></div>
+                    </div>
+                    <button 
+                      onClick={stopCameraScanner}
+                      className="mt-4 bg-error/10 text-error px-6 py-2 rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-error hover:text-white transition-all"
+                    >
+                      Close Camera
+                    </button>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={startCameraScanner}
+                    className="mt-6 bg-accent text-white px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] hover:scale-105 active:scale-95 transition-all shadow-lg shadow-accent/20 flex items-center gap-3"
+                  >
+                    <span>📷 OBTAIN FROM CAMERA</span>
+                  </button>
+                )}
+
+                <div className="w-full flex items-center gap-4 my-8">
+                  <div className="h-[1px] bg-slate-200 flex-1"></div>
+                  <span className="text-[10px] font-bold text-slate-300 uppercase tracking-[0.2em]">OR MANUAL SCAN</span>
+                  <div className="h-[1px] bg-slate-200 flex-1"></div>
+                </div>
+
+                <form onSubmit={lookupISBN} className="flex gap-2 w-full max-w-sm">
+                  <input 
+                    autoFocus
+                    placeholder="E.g. 9780141182636" 
+                    value={isbnLookup}
+                    onChange={(e) => setIsbnLookup(e.target.value)}
+                    className="input-field shadow-sm text-center font-mono tracking-widest text-lg"
+                  />
+                  <button 
+                    type="submit" 
+                    disabled={lookupLoading}
+                    className="btn-primary px-6 py-4 disabled:opacity-50"
+                  >
+                    {lookupLoading ? "..." : "LOOKUP"}
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {addMode === 'barcode' && scannedBook && (
+              <div className="section-card animate-in zoom-in-95 duration-300">
+                <div className="section-header border-b border-surface-border flex justify-between items-center">
+                  <div>
+                    <span className="text-[10px] font-black text-accent uppercase tracking-widest block mb-1">Scanned Asset Detected</span>
+                    <h2>Verify & Commit to Registry</h2>
+                  </div>
+                  <button onClick={() => setScannedBook(null)} className="text-error font-black text-[10px] uppercase tracking-widest hover:underline">Discard</button>
+                </div>
+                <form onSubmit={confirmAddScannedBook} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="col-span-full bg-blue-50 p-4 rounded-xl border border-blue-100 mb-2">
+                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] mb-1">Verify Metadata</p>
+                    <h4 className="text-lg font-black text-blue-900 leading-tight">{scannedBook.title}</h4>
+                    <p className="text-xs text-blue-700 font-bold italic mt-1">by {scannedBook.author}</p>
+                  </div>
+                  
+                  <input name="stocknumber" placeholder="Library Stock #" required className="input-field shadow-md border-accent/20 border-2" />
+                  <input name="callnumber" placeholder="Call #" required className="input-field shadow-sm" />
+                  <input name="title" defaultValue={scannedBook.title} className="input-field shadow-sm col-span-full font-bold text-slate-800" />
+                  <input name="author" defaultValue={scannedBook.author} className="input-field shadow-sm" />
+                  <input name="publisher" defaultValue={scannedBook.publisher} className="input-field shadow-sm" />
+                  <input name="category" defaultValue={scannedBook.category} className="input-field shadow-sm col-span-full" />
+                  
+                  <select name="language" defaultValue={scannedBook.language} className="input-field shadow-sm">
+                    <option value="">Select Language</option>
+                    <option value="MALAYALAM">MALAYALAM</option>
+                    <option value="ENGLISH">ENGLISH</option>
+                    <option value="HINDI">HINDI</option>
+                    <option value="TAMIL">TAMIL</option>
+                    <option value="SANSKRIT">SANSKRIT</option>
+                    <option value="OTHER">OTHER</option>
+                  </select>
+                  <select name="shelfnumber" required className="input-field shadow-sm border-blue-200 border">
+                    <option value="">Assign Shelf (1-30)</option>
+                    {Array.from({ length: 30 }, (_, i) => (
+                      <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
+                    ))}
+                  </select>
+                  <input name="price" placeholder="Asset Value / Price" className="input-field shadow-sm col-span-full" />
+                  
+                  <button type="submit" className="btn-primary py-4 col-span-full uppercase tracking-widest text-[11px] font-black shadow-lg shadow-primary/20 mt-4">
+                    Confirm & Store in Supabase
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {addMode === 'manual' && (
+              <div className="section-card animate-in fade-in duration-500">
+                <div className="section-header flex justify-between items-center">
+                  <h2>Register New Library Asset</h2>
+                  <div className="flex gap-2">
+                    <label className="btn-primary bg-slate-800 text-[10px] px-3 py-1.5 cursor-pointer flex items-center gap-1">
+                      <span>📥 BULK CSV</span>
+                      <input type="file" accept=".csv" onChange={bulkUpload} className="hidden" />
+                    </label>
+                  </div>
+                </div>
+                <form onSubmit={addBook} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input name="stocknumber" placeholder="Stock Number" required className="input-field shadow-sm" />
+                  <input name="callnumber" placeholder="Call Number" required className="input-field shadow-sm" />
+                  <input name="title" placeholder="Full Title" required className="input-field shadow-sm col-span-full" />
+                  <input name="author" placeholder="Author Name" required className="input-field shadow-sm" />
+                  <input name="publisher" placeholder="Publisher" className="input-field shadow-sm" />
+                  <input name="category" placeholder="Category" className="input-field shadow-sm col-span-full" />
+                  <select name="language" className="input-field shadow-sm">
+                    <option value="">Select Language</option>
+                    <option value="MALAYALAM">MALAYALAM</option>
+                    <option value="ENGLISH">ENGLISH</option>
+                    <option value="HINDI">HINDI</option>
+                    <option value="TAMIL">TAMIL</option>
+                    <option value="SANSKRIT">SANSKRIT</option>
+                    <option value="OTHER">OTHER</option>
+                  </select>
+                  <select name="shelfnumber" className="input-field shadow-sm">
+                    <option value="">Select Shelf (1-30)</option>
+                    {Array.from({ length: 30 }, (_, i) => (
+                      <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
+                    ))}
+                  </select>
+                  <input name="price" placeholder="Price" className="input-field shadow-sm col-span-full" />
+                  <button type="submit" className="btn-primary py-4 col-span-full uppercase tracking-widest text-[11px] font-black shadow-lg shadow-primary/20">Initialize Asset Registry</button>
+                </form>
+              </div>
+            )}
           </div>
         )}
 

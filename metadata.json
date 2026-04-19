@@ -1,6 +1,6 @@
 {
   "name": "Library Admin Pro",
   "description": "A comprehensive library management dashboard fully integrated with Supabase for books, members, circulation, and attendance tracking.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": []
 }
