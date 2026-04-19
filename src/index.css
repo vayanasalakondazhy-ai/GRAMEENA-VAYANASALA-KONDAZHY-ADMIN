@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  
+  --color-primary: #1e293b;
+  --color-accent: #2563eb;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-surface-bg: #f8fafc;
+  --color-surface-border: #e2e8f0;
+  --color-text-main: #0f172a;
+  --color-text-muted: #64748b;
+}
+
+@layer base {
+  body {
+    @apply bg-surface-bg text-text-main font-sans;
+  }
+}
+
+@layer components {
+  .section-card {
+    @apply bg-white rounded-xl border border-surface-border shadow-sm overflow-hidden;
+  }
+  
+  .table-header {
+    @apply bg-slate-100 text-text-muted text-xs font-semibold uppercase tracking-wider text-left p-3 border-b border-surface-border;
+  }
+  
+  .table-cell {
+    @apply p-4 border-b border-surface-border text-sm;
+  }
+
+  .btn-primary {
+    @apply bg-accent hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors shadow-sm;
+  }
+
+  .input-field {
+    @apply w-full p-2 bg-white rounded-lg border border-surface-border focus:ring-2 focus:ring-accent/20 focus:border-accent outline-none transition-all placeholder:text-text-muted/50;
+  }
+
+  .status-pill {
+    @apply px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-tight;
+  }
+}
+
