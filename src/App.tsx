@@ -591,7 +591,8 @@ export default function App() {
                       <td className="table-cell font-mono text-[11px] text-text-muted">{b.stocknumber}</td>
                       <td className="table-cell">
                         <div className="font-bold text-slate-900">{b.title}</div>
-                        <div className="text-[11px] text-text-muted">{b.author}</div>
+                        <div className="text-[11px] text-slate-600 font-medium">{b.author}</div>
+                        {b.publisher && <div className="text-[9px] text-text-muted italic opacity-70 mt-0.5">{b.publisher}</div>}
                       </td>
                       <td className="table-cell font-bold text-accent">{b.shelfnumber || "—"}</td>
                       <td className="table-cell text-center">
@@ -624,11 +625,12 @@ export default function App() {
               <input name="stocknumber" placeholder="Stock Number" required className="input-field shadow-sm" />
               <input name="callnumber" placeholder="Call Number" required className="input-field shadow-sm" />
               <input name="title" placeholder="Full Title" required className="input-field shadow-sm col-span-full" />
-              <input name="author" placeholder="Author Name" required className="input-field shadow-sm col-span-full" />
+              <input name="author" placeholder="Author Name" required className="input-field shadow-sm" />
+              <input name="publisher" placeholder="Publisher" className="input-field shadow-sm" />
               <input name="language" placeholder="Language" className="input-field shadow-sm" />
               <input name="category" placeholder="Category" className="input-field shadow-sm" />
               <input name="shelfnumber" placeholder="Storage Shelf" className="input-field shadow-sm" />
-              <input name="price" placeholder="Asset Value" className="input-field shadow-sm" />
+              <input name="price" placeholder="Price" className="input-field shadow-sm" />
               <button type="submit" className="btn-primary py-3 col-span-full uppercase tracking-widest text-[11px] font-black">Initialize Asset Registry</button>
             </form>
           </div>
@@ -902,9 +904,11 @@ export default function App() {
               <input name="callnumber" defaultValue={editBookModal.callnumber} placeholder="Call Number" className="input-field" />
               <input name="title" defaultValue={editBookModal.title} placeholder="Full Title" className="input-field" />
               <input name="author" defaultValue={editBookModal.author} placeholder="Author" className="input-field" />
+              <input name="publisher" defaultValue={editBookModal.publisher} placeholder="Publisher" className="input-field" />
               <input name="language" defaultValue={editBookModal.language} placeholder="Language" className="input-field" />
               <input name="category" defaultValue={editBookModal.category} placeholder="Category" className="input-field" />
               <input name="shelfnumber" defaultValue={editBookModal.shelfnumber} placeholder="Storage Shelf" className="input-field" />
+              <input name="price" defaultValue={editBookModal.price} placeholder="Price" className="input-field" />
               <div className="flex gap-3 pt-4">
                 <button type="submit" className="flex-1 btn-primary py-3">Commit Changes</button>
                 <button type="button" onClick={() => setEditBookModal(null)} className="flex-1 bg-slate-100 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-200 uppercase tracking-widest transition-all">Abort</button>
