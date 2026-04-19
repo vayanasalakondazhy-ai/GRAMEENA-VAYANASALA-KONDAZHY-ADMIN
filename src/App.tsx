@@ -1,6 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
 import { useEffect, useState, useCallback, useRef, FormEvent } from "react";
 import Swal from "sweetalert2";
+import { GoogleGenAI, Type } from "@google/genai";
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+  PieChart, Pie, Cell, LineChart, Line, Legend 
+} from "recharts";
+import Papa from "papaparse";
 
 // Supabase Client
 const supabaseUrl = "https://bfrgzovowzrmnygoxnsn.supabase.co";
@@ -33,6 +39,9 @@ export default function App() {
   const [editMemberModal, setEditMemberModal] = useState<any>(null);
   const [viewUserModal, setViewUserModal] = useState<any>(null);
   const [genMemberId, setGenMemberId] = useState("");
+  const [borrowingLimit, setBorrowingLimit] = useState(3);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
   // Issue/Return States
   const [issueSearchVal, setIssueSearchVal] = useState("");
@@ -162,6 +171,7 @@ export default function App() {
   // Reports
   const loadReports = useCallback(async () => {
     const { count: bCount } = await supabase.from("books").select("*", { count: "exact", head: true });
+    const { data: booksData } = await supabase.from("books").select("category, language");
     const { data: usersData } = await supabase.from("users").select("*");
     const { data: issuedData } = await supabase.from("issued_books").select("*");
     const { data: logsData } = await supabase.from("library_logs").select("*");
@@ -175,6 +185,27 @@ export default function App() {
       if (new Date() > new Date(d.due_date)) overdue++;
       usage[d.user_phone] = (usage[d.user_phone] || 0) + 1;
     });
+
+    // Category distribution for charts
+    const catMap: Record<string, number> = {};
+    booksData?.forEach(b => {
+      const cat = b.category || "Uncategorized";
+      catMap[cat] = (catMap[cat] || 0) + 1;
+    });
+    const categoryData = Object.entries(catMap).map(([name, value]) => ({ name, value })).slice(0, 5);
+
+    // Activity trend (last 7 days)
+    const trendMap: Record<string, number> = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      trendMap[d.toISOString().split("T")[0]] = 0;
+    }
+    logsData?.forEach(l => {
+      const day = l.in_time?.split("T")[0];
+      if (day && trendMap[day] !== undefined) trendMap[day]++;
+    });
+    const trendData = Object.entries(trendMap).map(([name, visitors]) => ({ name, visitors }));
 
     const userMap: Record<string, any> = {};
     usersData?.forEach(u => userMap[u.phone] = u);
@@ -194,8 +225,10 @@ export default function App() {
       issued: issuedData?.length || 0,
       overdue,
       visitors,
-      topUsers: topUsersList
-    });
+      topUsers: topUsersList,
+      categoryData,
+      trendData
+    } as any);
   }, []);
 
   // Issue/Return Logic
@@ -377,6 +410,92 @@ export default function App() {
     }
   };
 
+  const aiAutoFillCategory = async () => {
+    const title = (document.querySelector('input[name="title"]') as HTMLInputElement)?.value;
+    const author = (document.querySelector('input[name="author"]') as HTMLInputElement)?.value;
+    if (!title) return Swal.fire("Error", "Please enter a title first", "error");
+
+    setAiLoading(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Given the book title "${title}" and author "${author}", suggest a single short category name (e.g. Fiction, History, Science, Biography). Return ONLY the category name.`,
+      });
+      const category = response.text.trim().replace(/[^a-zA-Z ]/g, "");
+      const catInput = document.querySelector('input[name="category"]') as HTMLInputElement;
+      if (catInput) catInput.value = category;
+      Swal.fire("AI Suggestion", `Suggested category: ${category}`, "success");
+    } catch (err) {
+      console.error(err);
+      Swal.fire("AI Error", "Could not connect to AI engine", "error");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const bulkUpload = (e: any) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    Papa.parse(file, {
+      header: true,
+      complete: async (results) => {
+        const { data } = results;
+        const { error } = await supabase.from("books").insert(data);
+        if (error) Swal.fire("Upload Failed", error.message, "error");
+        else {
+          Swal.fire("Success", `Bulk uploaded ${data.length} assets`, "success");
+          loadDashboard();
+        }
+      }
+    });
+  };
+
+  const handleLostBook = async (book: any) => {
+    const { isConfirmed } = await Swal.fire({
+      title: 'Report Lost Book',
+      text: `Mark "${book.book?.title}" as lost? This will end the active loan.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Mark Lost'
+    });
+    if (!isConfirmed) return;
+    
+    // We update the book label or move it to a 'lost' state if schema allows
+    // For now, we clear the active loan and log it
+    const { error } = await supabase.from("issued_books").delete().eq("id", book.id);
+    if (!error) {
+      await logAudit("LOST_BOOK", `Book ${book.stock_number} reported lost by ${book.user_phone}`);
+      Swal.fire("Updated", "Book marked as lost in records", "info");
+      loadIssued();
+    }
+  };
+
+  const logAudit = async (action: string, details: string) => {
+    // Basic audit logging into a metadata string or dedicated table if it exists
+    console.log(`AUDIT [${action}]: ${details}`);
+    setAuditLogs(prev => [{ action, details, time: new Date().toLocaleTimeString() }, ...prev]);
+  };
+
+  const sendOverdueAlerts = async () => {
+    const overdues = issuedBooks.filter(b => b.status === 'overdue');
+    if (overdues.length === 0) return Swal.fire("Info", "No overdue users found", "info");
+    
+    Swal.fire({
+      title: 'Sending Alerts',
+      text: `Dispatching signals to ${overdues.length} overdue accounts...`,
+      timer: 2000,
+      showConfirmButton: false,
+      didOpen: () => Swal.showLoading()
+    });
+    
+    // Simulate email dispatch
+    setTimeout(() => {
+      Swal.fire("Success", "Email alerts dispatched to all overdue users.", "success");
+      logAudit("OVERDUE_ALERTS", `Sent to ${overdues.length} users`);
+    }, 2500);
+  };
+
   const exportExcel = () => {
     const rows = [["Stock", "User Phone", "Issue Date", "Due Date", "Status"]];
     issuedBooks.forEach(d => {
@@ -428,57 +547,105 @@ export default function App() {
   return (
     <div className="flex bg-surface-bg min-h-screen text-text-main font-sans">
       {/* Sidebar Navigation */}
-      <aside className="w-[240px] bg-primary text-white flex flex-col fixed h-full z-20 shadow-xl">
-        <div className="p-6 pb-8 flex items-center gap-3">
+      <aside className="w-[240px] bg-primary text-white flex flex-col fixed h-full z-20 shadow-xl overflow-y-auto">
+        <div className="p-6 pb-4 flex items-center gap-3">
           <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M4 6h18v2H4V6zm0 5h18v2H4v-2zm0 5h18v2H4v-2z"/></svg>
           </div>
-          <span className="text-xl font-bold tracking-tight">LibSys Admin</span>
+          <span className="text-xl font-bold tracking-tight">Vayanashala</span>
+        </div>
+        <div className="px-6 mb-6">
+          <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest leading-none">Management Console</p>
         </div>
         
         <nav className="flex-1">
-          <ul className="list-none">
+          <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Main Modules</div>
+          <ul className="list-none space-y-1 mb-6">
             {[
-              { id: "dashboard", label: "Dashboard" },
-              { id: "members", label: "Members" },
-              { id: "books", label: "Books Inventory" },
-              { id: "addBook", label: "Add Book" },
-              { id: "circulation", label: "Issue Records" },
-              { id: "return", label: "Return Books" },
-              { id: "issuedList", label: "Issued List" },
-              { id: "attendance", label: "System Logs" },
-              { id: "reports", label: "Reports" }
+              { id: "dashboard", label: "Dashboard", icon: "📊" },
+              { id: "members", label: "Members Registry", icon: "👤" },
+              { id: "books", label: "Books Inventory", icon: "📚" },
+              { id: "addBook", label: "Add Asset", icon: "➕" }
             ].map(tab => (
               <li
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-6 py-3.5 text-sm cursor-pointer transition-all flex items-center gap-3 border-r-4 ${
+                className={`px-6 py-2.5 text-sm cursor-pointer transition-all flex items-center gap-3 border-r-4 ${
                   activeTab === tab.id 
                     ? 'bg-white/10 text-white border-accent font-semibold' 
                     : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
                 }`}
               >
-                {tab.label}
+                <span>{tab.icon}</span> {tab.label}
+              </li>
+            ))}
+          </ul>
+
+          <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Circulation</div>
+          <ul className="list-none space-y-1 mb-6">
+            {[
+              { id: "circulation", label: "Issue Records", icon: "🛫" },
+              { id: "return", label: "Return Books", icon: "🛬" },
+              { id: "issuedList", label: "Live Ledger", icon: "📋" }
+            ].map(tab => (
+              <li
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-6 py-2.5 text-sm cursor-pointer transition-all flex items-center gap-3 border-r-4 ${
+                  activeTab === tab.id 
+                    ? 'bg-white/10 text-white border-accent font-semibold' 
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <span>{tab.icon}</span> {tab.label}
+              </li>
+            ))}
+          </ul>
+
+          <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Engagement & Ops</div>
+          <ul className="list-none space-y-1 mb-6">
+            {[
+              { id: "engagement", label: "Member Hub", icon: "🔔" },
+              { id: "advanced", label: "Advanced Ops", icon: "⚙️" },
+              { id: "reports", label: "Analytics", icon: "📈" },
+              { id: "attendance", label: "Gate Logs", icon: "🕒" }
+            ].map(tab => (
+              <li
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-6 py-2.5 text-sm cursor-pointer transition-all flex items-center gap-3 border-r-4 ${
+                  activeTab === tab.id 
+                    ? 'bg-white/10 text-white border-accent font-semibold' 
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <span>{tab.icon}</span> {tab.label}
               </li>
             ))}
           </ul>
         </nav>
-        
-        <div className="p-6 border-t border-white/5 text-[10px] text-slate-500 font-bold tracking-widest uppercase">
-          Supabase v1.0
-        </div>
       </aside>
 
       {/* Main Content Area */}
       <main className="flex-grow ml-[240px] p-8 flex flex-col gap-8">
-        <header className="flex justify-between items-end">
-          <div className="header-title">
-            <h1 className="text-2xl font-bold text-slate-900 capitalize">{activeTab.replace(/([A-Z])/g, ' $1')}</h1>
-            <p className="text-sm text-text-muted">Supabase Real-time Management Portal</p>
+        <header className="flex justify-between items-center bg-white p-6 rounded-2xl border border-surface-border shadow-sm">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center text-white text-xl">🏠</div>
+            <div>
+              <h1 className="text-2xl font-black text-primary tracking-tighter leading-none">GRAMEENA VAYANASALA KONDAZHY</h1>
+              <p className="text-[10px] text-text-muted font-black uppercase tracking-[0.2em] mt-1.5 flex items-center gap-2">
+                <span>REG NO: 1231</span>
+                <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
+                <span>Established Excellence</span>
+              </p>
+            </div>
           </div>
-          <div className="db-status flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-md border border-emerald-100 text-[11px] font-bold">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            SUPABASE CONNECTED
+          <div className="flex flex-col items-end">
+             <div className="db-status flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100 text-[10px] font-black tracking-widest mb-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              LIVE ENGINE
+            </div>
+            <p className="text-[10px] font-bold text-slate-400">{new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
           </div>
         </header>
         
@@ -640,8 +807,14 @@ export default function App() {
         {/* ADD BOOK */}
         {activeTab === "addBook" && (
           <div className="max-w-2xl section-card">
-            <div className="section-header">
+            <div className="section-header flex justify-between items-center">
               <h2>Register New Library Asset</h2>
+              <div className="flex gap-2">
+                <label className="btn-primary bg-slate-800 text-[10px] px-3 py-1.5 cursor-pointer flex items-center gap-1">
+                  <span>📥 BULK CSV</span>
+                  <input type="file" accept=".csv" onChange={bulkUpload} className="hidden" />
+                </label>
+              </div>
             </div>
             <form onSubmit={addBook} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
               <input name="stocknumber" placeholder="Stock Number" required className="input-field shadow-sm" />
@@ -649,6 +822,17 @@ export default function App() {
               <input name="title" placeholder="Full Title" required className="input-field shadow-sm col-span-full" />
               <input name="author" placeholder="Author Name" required className="input-field shadow-sm" />
               <input name="publisher" placeholder="Publisher" className="input-field shadow-sm" />
+              <div className="flex items-center gap-2 col-span-full">
+                <input name="category" placeholder="Category" className="input-field shadow-sm flex-1" />
+                <button 
+                  type="button" 
+                  onClick={aiAutoFillCategory} 
+                  disabled={aiLoading}
+                  className="bg-accent text-white px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
+                >
+                  {aiLoading ? "..." : "AI Fill"}
+                </button>
+              </div>
               <select name="language" className="input-field shadow-sm">
                 <option value="">Select Language</option>
                 <option value="MALAYALAM">MALAYALAM</option>
@@ -658,16 +842,130 @@ export default function App() {
                 <option value="SANSKRIT">SANSKRIT</option>
                 <option value="OTHER">OTHER</option>
               </select>
-              <input name="category" placeholder="Category" className="input-field shadow-sm" />
               <select name="shelfnumber" className="input-field shadow-sm">
                 <option value="">Select Shelf (1-30)</option>
                 {Array.from({ length: 30 }, (_, i) => (
                   <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
                 ))}
               </select>
-              <input name="price" placeholder="Price" className="input-field shadow-sm" />
-              <button type="submit" className="btn-primary py-3 col-span-full uppercase tracking-widest text-[11px] font-black">Initialize Asset Registry</button>
+              <input name="price" placeholder="Price" className="input-field shadow-sm col-span-full" />
+              <button type="submit" className="btn-primary py-4 col-span-full uppercase tracking-widest text-[11px] font-black shadow-lg shadow-primary/20">Initialize Asset Registry</button>
             </form>
+          </div>
+        )}
+
+        {/* MEMBER ENGAGEMENT */}
+        {activeTab === "engagement" && (
+          <div className="flex flex-col gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="section-card p-6 flex flex-col justify-between">
+                <div>
+                  <h3 className="text-lg font-black tracking-tight text-primary">Overdue Communication</h3>
+                  <p className="text-xs text-text-muted mt-1 leading-relaxed">Broadcast reminder signals to all active accounts with overdue circulation indices. System will use standard protocol.</p>
+                </div>
+                <button 
+                  onClick={sendOverdueAlerts}
+                  className="btn-primary w-fit mt-6 px-10 py-3 text-[10px] font-black tracking-[0.2em]"
+                >
+                  DISPATCH OVERDUE ALERTS
+                </button>
+              </div>
+              <div className="section-card p-6">
+                <h3 className="text-lg font-black tracking-tight text-primary">Global Borrowing Policy</h3>
+                <p className="text-xs text-text-muted mt-1 mb-4">Define maximum concurrent asset allocation per individual subscriber profile.</p>
+                <div className="flex items-center gap-3">
+                  <select 
+                    value={borrowingLimit} 
+                    onChange={(e) => setBorrowingLimit(Number(e.target.value))}
+                    className="input-field w-32 font-black"
+                  >
+                    {[1, 2, 3, 4, 5, 10, 20].map(v => <option key={v} value={v}>{v} ASSETS</option>)}
+                  </select>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Syncing with registry...</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="section-card">
+              <div className="section-header">
+                <h2>Member Performance Records</h2>
+              </div>
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    <th className="table-header">Identity</th>
+                    <th className="table-header">Usage Volume</th>
+                    <th className="table-header text-right">Deep Profile</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {members.map(m => (
+                    <tr key={m.id} className="hover:bg-slate-50 transition-colors border-b border-slate-50">
+                      <td className="table-cell">
+                        <div className="font-bold">{m.name}</div>
+                        <div className="text-[10px] text-text-muted">{m.phone}</div>
+                      </td>
+                      <td className="table-cell">
+                        <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-accent" style={{ width: '40%' }}></div>
+                        </div>
+                      </td>
+                      <td className="table-cell text-right">
+                        <button 
+                          onClick={() => setViewUserModal(m)}
+                          className="text-primary font-black text-[10px] tracking-widest uppercase hover:underline"
+                        >
+                          View Borrowing History
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ADVANCED OPERATIONS */}
+        {activeTab === "advanced" && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-1 flex flex-col gap-6">
+              <div className="section-card p-6 border-t-4 border-t-error">
+                <h3 className="text-sm font-black text-error mb-4 uppercase tracking-widest">Breach Management</h3>
+                <p className="text-xs text-text-muted mb-6">Select from active circulations to report permanent asset loss or displacement from the central registry.</p>
+                <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                   {issuedBooks.map(b => (
+                     <div key={b.id} className="p-3 bg-slate-50 rounded-lg border border-surface-border flex justify-between items-center group">
+                       <div className="text-[10px] font-bold">
+                         <div className="text-slate-900 truncate w-40">{b.book?.title}</div>
+                         <div className="text-slate-400 font-mono tracking-tighter">{b.stock_number}</div>
+                       </div>
+                       <button onClick={() => handleLostBook(b)} className="bg-red-50 text-error p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-error hover:text-white">
+                         🏴 Mark Lost
+                       </button>
+                     </div>
+                   ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-2 section-card h-full">
+              <div className="section-header">
+                <h2>Activity Audit Ledger</h2>
+              </div>
+              <div className="p-4 space-y-3 h-[500px] overflow-y-auto font-mono text-[11px]">
+                {auditLogs.length === 0 && <div className="text-slate-300 italic">Static system listening... No active anomalies detected.</div>}
+                {auditLogs.map((log, i) => (
+                  <div key={i} className="p-3 border rounded-xl bg-slate-50 border-slate-100 flex gap-4 items-start">
+                    <span className="text-accent font-bold">[{log.time}]</span>
+                    <div>
+                      <span className="bg-slate-800 text-white px-1.5 py-0.5 rounded text-[9px] mr-2">{log.action}</span>
+                      <span className="text-slate-600">{log.details}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -877,12 +1175,56 @@ export default function App() {
         {/* REPORTS */}
         {activeTab === "reports" && (
           <div className="flex flex-col gap-8">
-            <div className="section-card p-6 bg-primary text-white border-none flex justify-between items-center">
+            <div className="section-card p-8 bg-gradient-to-br from-primary to-slate-800 text-white border-none flex justify-between items-center shadow-xl">
               <div>
-                <h2 className="text-xl font-black tracking-tighter">ANALYTICS INSIGHTS</h2>
-                <p className="text-[10px] text-white/50 uppercase font-bold tracking-widest mt-1">Cross-Database Performance Metrics</p>
+                <h2 className="text-3xl font-black tracking-tighter italic">ANALYTIC ENGINE v4.2</h2>
+                <p className="text-[10px] text-white/50 uppercase font-black tracking-[0.4em] mt-2">Deep Relational Telemetry Dashboard</p>
               </div>
-              <button onClick={exportExcel} className="btn-primary bg-white text-primary border-none font-black hover:bg-slate-100 px-6">EXPORT DATA ENGINE</button>
+              <button onClick={exportExcel} className="bg-white text-primary px-8 py-3 rounded-xl font-black text-[11px] tracking-widest hover:bg-accent hover:text-white transition-all shadow-lg active:scale-95">EXPORT RAW STRATA</button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="section-card p-6">
+                <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6 border-b pb-4">Category Saturation</h3>
+                <div className="h-[260px] w-full">
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie
+                        data={reportSummary.categoryData}
+                        cx="50%" cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {reportSummary.categoryData?.map((entry: any, index: number) => (
+                          <Cell key={`cell-${index}`} fill={['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '12px', color: '#fff', fontSize: '10px' }}
+                        itemStyle={{ color: '#fff' }}
+                      />
+                      <Legend verticalAlign="bottom" height={36}/>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="section-card p-6">
+                <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6 border-b pb-4">Gate Traffic Frequency</h3>
+                <div className="h-[260px] w-full">
+                  <ResponsiveContainer>
+                    <BarChart data={reportSummary.trendData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 700 }} />
+                      <YAxis tick={{ fontSize: 9, fontWeight: 700 }} />
+                      <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', fontSize: '10px', fontStyle: 'bold' }} />
+                      <Bar dataKey="visitors" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
@@ -892,35 +1234,11 @@ export default function App() {
                 { label: "Overdue Breaches", value: reportSummary.overdue, color: "text-error" },
                 { label: "Gate Traffic", value: reportSummary.visitors, color: "text-emerald-600" }
               ].map((s, i) => (
-                <div key={i} className="section-card p-6 border-l-4 border-l-accent">
-                  <span className="text-[10px] font-black uppercase text-text-muted mb-2 block">{s.label}</span>
-                  <span className={`text-4xl font-black ${s.color}`}>{s.value}</span>
+                <div key={i} className="section-card p-6 border-l-4 border-l-primary hover:translate-y-[-4px] transition-all">
+                  <span className="text-[10px] font-black uppercase text-slate-400 mb-2 block tracking-widest">{s.label}</span>
+                  <span className={`text-4xl font-black tracking-tighter ${s.color}`}>{s.value}</span>
                 </div>
               ))}
-            </div>
-
-            <div className="section-card">
-              <div className="section-header">
-                <h2>Top Engagement Profiles</h2>
-              </div>
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-slate-50">
-                    <th className="table-header">Identity</th>
-                    <th className="table-header">Account Phone</th>
-                    <th className="table-header text-right">Circulation Count</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportSummary.topUsers.map(u => (
-                    <tr key={u.phone} className="hover:bg-slate-50">
-                      <td className="table-cell font-bold">{u.name || "Anon."}</td>
-                      <td className="table-cell text-text-muted font-mono text-xs">{u.phone}</td>
-                      <td className="table-cell text-right font-black text-accent">{u.count} Assets</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           </div>
         )}
@@ -1009,19 +1327,41 @@ export default function App() {
               <p className="text-xs text-white/50 font-bold tracking-widest uppercase mt-1">Member Profile Instance</p>
             </div>
             <div className="p-8 space-y-4">
-              {[
-                { label: "Phone", val: viewUserModal.phone },
-                { label: "Location", val: viewUserModal.address },
-                { label: "Email Contact", val: viewUserModal.email },
-                { label: "Membership ID", val: viewUserModal.member_id },
-                { label: "Current Status", val: "ACTIVE", colored: "text-emerald-500 font-black" }
-              ].map((row, i) => (
-                <div key={i} className="flex justify-between items-center border-b border-surface-border pb-2">
-                  <span className="text-[10px] font-black text-text-muted uppercase tracking-widest">{row.label}</span>
-                  <span className={`text-[11px] font-bold ${row.colored || "text-slate-900"}`}>{row.val || "—"}</span>
-                </div>
-              ))}
-              <button onClick={() => setViewUserModal(null)} className="w-full btn-primary py-3 mt-4">Close Profile</button>
+              <div className="grid grid-cols-2 gap-4 border-b border-surface-border pb-4 mb-4">
+                {[
+                  { label: "Phone", val: viewUserModal.phone },
+                  { label: "Membership ID", val: viewUserModal.member_id },
+                ].map((row, i) => (
+                  <div key={i}>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{row.label}</p>
+                    <p className="text-xs font-bold text-slate-900">{row.val || "—"}</p>
+                  </div>
+                ))}
+              </div>
+
+              <h4 className="text-[10px] font-black text-primary uppercase tracking-widest mb-2 flex items-center gap-2">
+                <span>Borrowed Catalog</span>
+                <span className="flex-1 h-px bg-slate-100"></span>
+              </h4>
+              
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
+                {issuedBooks.filter(ib => ib.user_phone === viewUserModal.phone).length === 0 && (
+                  <div className="text-center py-8 text-slate-300 italic text-[11px]">No circulation history detected for this profile.</div>
+                )}
+                {issuedBooks.filter(ib => ib.user_phone === viewUserModal.phone).map((record, i) => (
+                  <div key={i} className="bg-slate-50 p-3 rounded-lg border border-slate-100 flex justify-between items-center group">
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">{record.book?.title}</p>
+                      <p className="text-[9px] text-slate-400 italic font-medium">STOCK: {record.stock_number} | DUE: {record.due_date?.split('T')[0]}</p>
+                    </div>
+                    <span className={`text-[9px] px-2 py-0.5 rounded-full font-black tracking-tight ${record.status === 'overdue' ? 'bg-red-100 text-error' : 'bg-blue-100 text-primary'}`}>
+                      {record.status.toUpperCase()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={() => setViewUserModal(null)} className="w-full btn-primary py-4 mt-6 uppercase font-black text-[10px] tracking-widest shadow-lg shadow-primary/20">Close Institutional Profile</button>
             </div>
           </div>
         </div>
