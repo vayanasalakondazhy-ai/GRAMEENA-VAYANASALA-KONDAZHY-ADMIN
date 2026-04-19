@@ -15,6 +15,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [currentTime, setCurrentTime] = useState(new Date());
   const [counts, setCounts] = useState({ books: 0, users: 0, issued: 0 });
   const [members, setMembers] = useState<any[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
@@ -40,7 +41,6 @@ export default function App() {
   const [viewUserModal, setViewUserModal] = useState<any>(null);
   const [genMemberId, setGenMemberId] = useState("");
   const [borrowingLimit, setBorrowingLimit] = useState(3);
-  const [aiLoading, setAiLoading] = useState(false);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
   // Issue/Return States
@@ -410,69 +410,6 @@ export default function App() {
     }
   };
 
-  const aiAutoFillCategory = async () => {
-    const titleInput = document.querySelector('input[name="title"]') as HTMLInputElement;
-    const authorInput = document.querySelector('input[name="author"]') as HTMLInputElement;
-    const title = titleInput?.value;
-    const author = authorInput?.value;
-    
-    if (!title) return Swal.fire("Input Required", "Please enter a title first to help AI identify the category", "warning");
-
-    setAiLoading(true);
-    try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      
-      if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
-        throw new Error("Gemini API Key is not configured correctly in the environment.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Task: Categorize the following library asset.
-Book Title: "${title}"
-Author: "${author || "Unknown"}"
-
-Suggest a single, short, standard library category (e.g., Fiction, History, Science, Philosophy, Biography, Technology, Arts, Religion, Social Science). 
-Return ONLY the category name as a single word or short phrase.`,
-      });
-      
-      const suggestedText = response.text;
-      if (!suggestedText) {
-        throw new Error("The AI engine returned an empty response.");
-      }
-
-      const category = suggestedText.trim().replace(/[^a-zA-Z0-9 ]/g, "");
-      const catInput = document.querySelector('input[name="category"]') as HTMLInputElement;
-      if (catInput) {
-        catInput.value = category;
-        // Trigger any potential change handlers
-        catInput.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      
-      Swal.fire({
-        title: "AI Suggested",
-        text: `Identified category: ${category}`,
-        icon: "success",
-        timer: 2000,
-        showConfirmButton: false
-      });
-    } catch (err: any) {
-      console.error("AI Connection Error:", err);
-      let errorMessage = "Could not connect to AI engine.";
-      
-      if (err.message?.includes("API Key") || err.message?.includes("key")) {
-        errorMessage = "Invalid or missing API settings. Please verify the Gemini API Key configuration.";
-      } else if (err.message?.includes("model") || err.message?.includes("404")) {
-        errorMessage = "The AI model is currently unavailable or the request format is incompatible.";
-      }
-      
-      Swal.fire("System Error", errorMessage, "error");
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
   const bulkUpload = (e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -556,6 +493,11 @@ Return ONLY the category name as a single word or short phrase.`,
   };
 
   // Lifecycle
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     loadDashboard();
     loadMembers();
@@ -684,23 +626,58 @@ Return ONLY the category name as a single word or short phrase.`,
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
               LIVE ENGINE
             </div>
-            <p className="text-[10px] font-bold text-slate-400">{new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+            <p className="text-xl font-black text-slate-800 tracking-tighter tabular-nums">
+              {currentTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+            </p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+              {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', weekday: 'short' })}
+            </p>
           </div>
         </header>
         
         {/* DASHBOARD */}
         {activeTab === "dashboard" && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              { label: "Total Books", value: counts.books, color: "text-slate-900" },
-              { label: "Registered Users", value: counts.users, color: "text-accent" },
-              { label: "Currently Issued", value: counts.issued, color: "text-amber-600" }
-            ].map((stat, i) => (
-              <div key={i} className="bg-white p-6 rounded-xl border border-surface-border shadow-sm">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-2">{stat.label}</p>
-                <p className={`text-3xl font-black ${stat.color}`}>{stat.value}</p>
+          <div className="flex flex-col gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {[
+                { label: "Inventory Assets", value: counts.books, color: "text-slate-900", icon: "📚" },
+                { label: "Active Members", value: counts.users, color: "text-accent", icon: "👤" },
+                { label: "Current Loans", value: counts.issued, color: "text-amber-600", icon: "🛫" }
+              ].map((stat, i) => (
+                <div key={i} className="bg-white p-6 rounded-2xl border border-surface-border shadow-sm flex flex-col justify-center">
+                  <div className="flex justify-between items-start mb-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{stat.label}</p>
+                    <span className="text-lg opacity-80">{stat.icon}</span>
+                  </div>
+                  <p className={`text-4xl font-black tracking-tighter ${stat.color}`}>{stat.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="section-card p-6 bg-slate-50/50 border-dashed border-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center text-xl">🚀</div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">System Health</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Postgres Instance Operational</p>
+                  </div>
+                </div>
+                <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-500 w-[94%] animate-shimmer"></div>
+                </div>
               </div>
-            ))}
+              <div className="section-card p-6 bg-blue-50/50 border-dashed border-2">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center text-xl">💡</div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Quick Action</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Analyze overdue accounts instantly</p>
+                  </div>
+                </div>
+                <button onClick={() => setActiveTab('engagement')} className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline">Launch Hub →</button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -861,17 +838,7 @@ Return ONLY the category name as a single word or short phrase.`,
               <input name="title" placeholder="Full Title" required className="input-field shadow-sm col-span-full" />
               <input name="author" placeholder="Author Name" required className="input-field shadow-sm" />
               <input name="publisher" placeholder="Publisher" className="input-field shadow-sm" />
-              <div className="flex items-center gap-2 col-span-full">
-                <input name="category" placeholder="Category" className="input-field shadow-sm flex-1" />
-                <button 
-                  type="button" 
-                  onClick={aiAutoFillCategory} 
-                  disabled={aiLoading}
-                  className="bg-accent text-white px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
-                >
-                  {aiLoading ? "..." : "AI Fill"}
-                </button>
-              </div>
+              <input name="category" placeholder="Category" className="input-field shadow-sm col-span-full" />
               <select name="language" className="input-field shadow-sm">
                 <option value="">Select Language</option>
                 <option value="MALAYALAM">MALAYALAM</option>
