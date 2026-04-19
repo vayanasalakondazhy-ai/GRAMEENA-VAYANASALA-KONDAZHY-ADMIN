@@ -411,24 +411,63 @@ export default function App() {
   };
 
   const aiAutoFillCategory = async () => {
-    const title = (document.querySelector('input[name="title"]') as HTMLInputElement)?.value;
-    const author = (document.querySelector('input[name="author"]') as HTMLInputElement)?.value;
-    if (!title) return Swal.fire("Error", "Please enter a title first", "error");
+    const titleInput = document.querySelector('input[name="title"]') as HTMLInputElement;
+    const authorInput = document.querySelector('input[name="author"]') as HTMLInputElement;
+    const title = titleInput?.value;
+    const author = authorInput?.value;
+    
+    if (!title) return Swal.fire("Input Required", "Please enter a title first to help AI identify the category", "warning");
 
     setAiLoading(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const apiKey = process.env.GEMINI_API_KEY;
+      
+      if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
+        throw new Error("Gemini API Key is not configured correctly in the environment.");
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Given the book title "${title}" and author "${author}", suggest a single short category name (e.g. Fiction, History, Science, Biography). Return ONLY the category name.`,
+        contents: `Task: Categorize the following library asset.
+Book Title: "${title}"
+Author: "${author || "Unknown"}"
+
+Suggest a single, short, standard library category (e.g., Fiction, History, Science, Philosophy, Biography, Technology, Arts, Religion, Social Science). 
+Return ONLY the category name as a single word or short phrase.`,
       });
-      const category = response.text.trim().replace(/[^a-zA-Z ]/g, "");
+      
+      const suggestedText = response.text;
+      if (!suggestedText) {
+        throw new Error("The AI engine returned an empty response.");
+      }
+
+      const category = suggestedText.trim().replace(/[^a-zA-Z0-9 ]/g, "");
       const catInput = document.querySelector('input[name="category"]') as HTMLInputElement;
-      if (catInput) catInput.value = category;
-      Swal.fire("AI Suggestion", `Suggested category: ${category}`, "success");
-    } catch (err) {
-      console.error(err);
-      Swal.fire("AI Error", "Could not connect to AI engine", "error");
+      if (catInput) {
+        catInput.value = category;
+        // Trigger any potential change handlers
+        catInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      
+      Swal.fire({
+        title: "AI Suggested",
+        text: `Identified category: ${category}`,
+        icon: "success",
+        timer: 2000,
+        showConfirmButton: false
+      });
+    } catch (err: any) {
+      console.error("AI Connection Error:", err);
+      let errorMessage = "Could not connect to AI engine.";
+      
+      if (err.message?.includes("API Key") || err.message?.includes("key")) {
+        errorMessage = "Invalid or missing API settings. Please verify the Gemini API Key configuration.";
+      } else if (err.message?.includes("model") || err.message?.includes("404")) {
+        errorMessage = "The AI model is currently unavailable or the request format is incompatible.";
+      }
+      
+      Swal.fire("System Error", errorMessage, "error");
     } finally {
       setAiLoading(false);
     }
