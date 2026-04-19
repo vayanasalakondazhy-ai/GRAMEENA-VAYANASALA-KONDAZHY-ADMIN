@@ -341,6 +341,23 @@ export default function App() {
   const issueBook = async () => {
     if (!selectedIssueBook || !selectedIssueUserPhone) return alert("Select book and user");
     
+    // Check borrowing limit
+    const { data: userCurrentIssues, error: countError } = await supabase
+      .from("issued_books")
+      .select("*", { count: "exact", head: true })
+      .eq("user_phone", selectedIssueUserPhone);
+
+    if (countError) {
+      console.error("Limit check error:", countError);
+    } else if (userCurrentIssues && userCurrentIssues >= borrowingLimit) {
+      return Swal.fire({
+        icon: 'error',
+        title: 'Limit Exceeded!',
+        text: `This member already has ${borrowingLimit} assets. Please return an asset before issuing a new one.`,
+        footer: `<span style="font-size: 10px; color: #94a3b8; font-weight: bold; text-transform: uppercase;">Current Policy: ${borrowingLimit} Assets Max</span>`
+      });
+    }
+    
     // Check if already issued
     const { data: existing } = await supabase.from("issued_books").select("*").eq("book_id", selectedIssueBook.id).maybeSingle();
     if (existing) return Swal.fire({ icon: 'error', title: 'Oops!', text: 'This book is already issued.' });
