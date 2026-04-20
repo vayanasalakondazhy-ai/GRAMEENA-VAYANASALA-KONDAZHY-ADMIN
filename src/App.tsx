@@ -621,9 +621,12 @@ export default function App() {
     }
   };
 
-  const startCameraScanner = async (cameraId?: string) => {
+  const startCameraScanner = async (cameraIdParam?: string) => {
     setShowCamera(true);
     setCameraError(null);
+    
+    // Ensure cameraId is a string, not an Event object
+    const cameraId = typeof cameraIdParam === 'string' ? cameraIdParam : undefined;
     
     // Give state time to update the DOM
     setTimeout(async () => {
@@ -1311,7 +1314,7 @@ export default function App() {
                   </div>
                 ) : (
                   <button 
-                    onClick={startCameraScanner}
+                    onClick={() => startCameraScanner()}
                     className="mt-6 bg-accent text-white px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] hover:scale-105 active:scale-95 transition-all shadow-lg shadow-accent/20 flex items-center gap-3"
                   >
                     <span>📷 OBTAIN FROM CAMERA</span>
