@@ -48,6 +48,8 @@ export default function App() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [scannedBook, setScannedBook] = useState<any>(null);
   const [showCamera, setShowCamera] = useState(false);
+  const [cameras, setCameras] = useState<any[]>([]);
+  const [selectedCamera, setSelectedCamera] = useState<string>("");
   const addFormRef = useRef<HTMLFormElement>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
@@ -482,25 +484,50 @@ export default function App() {
     }
   };
 
-  const startCameraScanner = async () => {
+  const startCameraScanner = async (cameraId?: string) => {
     setShowCamera(true);
-    // Increased delay and simplified config to prevent blank screen
+    // Give state time to update the DOM
     setTimeout(async () => {
       try {
         const container = document.getElementById("reader");
-        if (!container) throw new Error("Scanner container not found in DOM.");
+        if (!container) return;
+
+        // Cleanup existing if any
+        if (scannerRef.current) {
+          try { await scannerRef.current.stop(); } catch(e){}
+        }
 
         const html5QrCode = new Html5Qrcode("reader");
         scannerRef.current = html5QrCode;
+
+        // Get available cameras if not already loaded
+        if (cameras.length === 0) {
+          try {
+            const devices = await Html5Qrcode.getCameras();
+            if (devices && devices.length > 0) {
+              setCameras(devices);
+              // Default to first camera if none selected
+              if (!selectedCamera) setSelectedCamera(devices[0].id);
+            }
+          } catch (e) {
+            console.warn("Could not list cameras", e);
+          }
+        }
         
         const config = { 
-          fps: 15, 
-          qrbox: { width: 280, height: 150 }, 
-          // Removed strict aspect ratio to allow browser default
+          fps: 25, // Higher FPS for faster detection
+          qrbox: { width: 320, height: 160 }, // Horizontal box for barcodes
+          aspectRatio: 1.777778,
+          // Help decoder focus on barcodes
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true
+          }
         };
 
+        const targetDevice = cameraId || selectedCamera || { facingMode: "environment" };
+
         await html5QrCode.start(
-          { facingMode: "environment" }, 
+          targetDevice, 
           config, 
           (decodedText) => {
             html5QrCode.stop().then(() => {
@@ -516,11 +543,17 @@ export default function App() {
         Swal.fire({
           icon: 'error',
           title: 'Camera Connection Failed',
-          text: 'Unable to attach video stream. Please ensure your camera is not being used by another app and check permissions.',
-          confirmButtonText: 'Try Again'
+          text: 'Unable to start video. Ensure permissions are granted and no other app is using the camera.',
         });
       }
     }, 500);
+  };
+
+  const handleCameraChange = (id: string) => {
+    setSelectedCamera(id);
+    if (showCamera) {
+      startCameraScanner(id);
+    }
   };
 
   const stopCameraScanner = async () => {
@@ -1004,16 +1037,30 @@ export default function App() {
 
                 {showCamera ? (
                   <div className="w-full max-w-md mt-6 relative group flex flex-col items-center">
+                    {cameras.length > 1 && (
+                      <div className="mb-4 w-full">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Switch Camera Source</label>
+                        <select 
+                          className="input-field text-xs"
+                          value={selectedCamera}
+                          onChange={(e) => handleCameraChange(e.target.value)}
+                        >
+                          {cameras.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                        </select>
+                      </div>
+                    )}
                     <div id="reader" className="w-full overflow-hidden rounded-xl border-4 border-accent shadow-2xl bg-slate-900 min-h-[250px]"></div>
-                    <div className="absolute top-[20%] left-0 right-0 pointer-events-none flex items-center justify-center">
-                      <div className="w-3/4 h-24 border-2 border-accent/50 rounded-lg animate-pulse shadow-[0_0_15px_rgba(59,130,246,0.5)]"></div>
+                    <div className="absolute top-[35%] left-0 right-0 pointer-events-none flex items-center justify-center opacity-60">
+                      <div className="w-[85%] h-32 border-2 border-accent border-dashed rounded-lg animate-pulse"></div>
                     </div>
-                    <button 
-                      onClick={stopCameraScanner}
-                      className="mt-4 bg-error/10 text-error px-6 py-2 rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-error hover:text-white transition-all"
-                    >
-                      Close Camera
-                    </button>
+                    <div className="mt-4 flex gap-4">
+                      <button 
+                        onClick={stopCameraScanner}
+                        className="bg-slate-200 text-slate-700 px-6 py-2 rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-slate-300 transition-all"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <button 
