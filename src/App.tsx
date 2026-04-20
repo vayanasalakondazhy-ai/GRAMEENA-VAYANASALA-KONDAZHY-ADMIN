@@ -1475,7 +1475,7 @@ export default function App() {
                 <div className="flex items-center gap-4 mb-8 border-b-2 border-slate-50 pb-6 relative">
                   <div className="w-14 h-14 bg-primary text-white rounded-[20px] flex items-center justify-center text-2xl shadow-xl shadow-primary/30 transform -rotate-3 hover:rotate-0 transition-transform">📝</div>
                   <div>
-                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Onboard Member</h3>
+                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">REGISTER NEW MEMBER</h3>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mt-1">Registry Entry Protocol v3.0</p>
                   </div>
                   <div className="absolute right-0 top-0 opacity-5 pointer-events-none">
@@ -1492,11 +1492,11 @@ export default function App() {
                     
                     <div className="grid grid-cols-2 gap-4">
                       <div className="group text-left">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Telecom ID</label>
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">MOBILE NO</label>
                         <input name="phone" placeholder="+91 XXXX..." required className="input-field py-4 bg-slate-50/50 focus:bg-white" />
                       </div>
                       <div className="group text-left">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Birth Sequence</label>
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">DATE OF BIRTH</label>
                         <input name="dob" type="date" className="input-field py-4 bg-slate-50/50 focus:bg-white" />
                       </div>
                     </div>
@@ -1512,11 +1512,11 @@ export default function App() {
                         <input name="pincode" placeholder="680XXX" className="input-field py-4 bg-slate-50/50 focus:bg-white" />
                       </div>
                       <div className="group text-left">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Unique Key ID</label>
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">MEMBERSHIP ID</label>
                         <div className="flex gap-2">
                           <input 
                             name="member_id" 
-                            placeholder="GEN_ID" 
+                            placeholder="AUTO_ID" 
                             value={genMemberId}
                             onChange={(e) => setGenMemberId(e.target.value)}
                             className="input-field flex-1 text-center font-mono py-4 bg-slate-50/50 focus:bg-white" 
@@ -1538,7 +1538,7 @@ export default function App() {
                     <div className="flex justify-between items-center">
                       <p className="text-[10px] font-black uppercase tracking-widest text-accent flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-accent animate-ping"></span>
-                        Service Tier Authorization
+                        SUBSCRIPTION Authorization
                       </p>
                       <span className="text-[10px] text-white/40 font-mono tracking-tighter">REF_SYS_77</span>
                     </div>
@@ -1554,13 +1554,13 @@ export default function App() {
                       </div>
                     </div>
                     <div className="flex justify-between items-center pt-2 border-t border-white/5">
-                       <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Initialization Fee</p>
+                       <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">INITIALIZATION FEE</p>
                        <p className="text-sm font-black text-white tracking-widest tabular-nums">₹{subsJoiningFee}</p>
                     </div>
                   </div>
 
                   <button type="submit" className="w-full py-5 bg-primary text-white rounded-3xl text-sm font-black tracking-[0.2em] uppercase shadow-[0_15px_40px_rgba(15,23,42,0.3)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3">
-                    🚀 Commit Member to Database
+                    🚀 REGISTER Member to Database
                   </button>
                 </form>
               </div>
