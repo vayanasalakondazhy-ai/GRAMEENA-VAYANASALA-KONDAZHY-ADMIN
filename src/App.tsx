@@ -46,6 +46,7 @@ export default function App() {
   const [addMode, setAddMode] = useState<"manual" | "barcode">("manual");
   const [isbnLookup, setIsbnLookup] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupResults, setLookupResults] = useState<any[]>([]);
   const [scannedBook, setScannedBook] = useState<any>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [cameras, setCameras] = useState<any[]>([]);
@@ -504,48 +505,137 @@ export default function App() {
     }
   };
 
+  // Helper to convert between ISBN-10 and ISBN-13 for better database coverage
+  const getIsbnVariants = (isbn: string) => {
+    const clean = isbn.replace(/[^0-9X]/gi, '').toUpperCase();
+    const variants = [clean];
+    
+    // Robust conversion logic for 978-based ISBNs
+    if (clean.length === 13 && clean.startsWith("978")) {
+      // Calculate ISBN-10 Checksum
+      let s = clean.substring(3, 12);
+      let sum = 0;
+      for (let i = 0; i < 9; i++) {
+        sum += (10 - i) * parseInt(s[i]);
+      }
+      let check = 11 - (sum % 11);
+      let finalCheck = check === 10 ? 'X' : (check === 11 ? '0' : check.toString());
+      variants.push(s + finalCheck);
+    } else if (clean.length === 10) {
+      // ISBN-10 to ISBN-13 (978 prefix)
+      let s = "978" + clean.substring(0, 9);
+      let sum = 0;
+      for (let i = 0; i < 12; i++) {
+        sum += (i % 2 === 0 ? 1 : 3) * parseInt(s[i]);
+      }
+      let check = 10 - (sum % 10);
+      let finalCheck = check === 10 ? '0' : check.toString();
+      variants.push(s + finalCheck);
+    }
+    return Array.from(new Set(variants));
+  };
+
   const lookupISBN = async (e?: FormEvent, manualIsbn?: string) => {
     if (e) e.preventDefault();
-    const targetIsbn = manualIsbn || isbnLookup;
-    if (!targetIsbn.trim()) return Swal.fire("Input Required", "Please enter/scan an ISBN barcode.", "warning");
+    let rawIsbn = manualIsbn || isbnLookup;
+    
+    // 1. ADVANCED SANITIZATION & EXTRACTION
+    let digitsOnly = rawIsbn.replace(/[^0-9X]/gi, '').trim().toUpperCase();
+    let targetIsbn = digitsOnly;
+    
+    // Smart Truncation for EAN-13 + 5 Price Addon
+    if (digitsOnly.length > 13) {
+      if (digitsOnly.startsWith("978") || digitsOnly.startsWith("979")) {
+        targetIsbn = digitsOnly.substring(0, 13);
+      } else if (digitsOnly.length === 18 || digitsOnly.length === 17) {
+         targetIsbn = digitsOnly.substring(0, 13);
+      }
+    }
+
+    setIsbnLookup(targetIsbn);
+
+    if (!targetIsbn || targetIsbn.length < 10) {
+      return Swal.fire("Input Too Short", "Please provide a valid Barcode/ISBN.", "warning");
+    }
+
+    const isbnVariants = getIsbnVariants(targetIsbn);
 
     setLookupLoading(true);
     setScannedBook(null);
-    setLookupStep("Searching Google Records...");
+    setLookupResults([]);
+    setLookupStep("Searching National & Global Registries...");
+    
     try {
-      // 1. Try Google Books API
-      let res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${targetIsbn.trim()}`);
-      let data = await res.json();
+      // 2. Multi-Format Search Strategy
+      const searchPromises: Promise<any>[] = [];
+      
+      isbnVariants.forEach(v => {
+        // Search by explicit ISBN prefix
+        searchPromises.push(fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${v}`).then(r => r.json()).catch(() => null));
+        searchPromises.push(fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${v}&format=json&jscmd=data`).then(r => r.json()).catch(() => null));
+        // Also perform a general text search with the number - helps if it's an EAN that isn't strictly an ISBN
+        searchPromises.push(fetch(`https://www.googleapis.com/books/v1/volumes?q=${v}`).then(r => r.json()).catch(() => null));
+      });
 
-      let info;
-      if (data.items && data.items.length > 0) {
-        info = data.items[0].volumeInfo;
-      } else {
-        // 2. Fallback to Open Library if Google Books fails
-        setLookupStep("Consulting Open Library Archive...");
-        res = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${targetIsbn.trim()}&format=json&jscmd=data`);
-        data = await res.json();
-        const bookKey = `ISBN:${targetIsbn.trim()}`;
-        if (data[bookKey]) {
-          const olBook = data[bookKey];
-          info = {
-            title: olBook.title,
-            authors: olBook.authors?.map((a: any) => a.name),
-            publisher: olBook.publishers?.[0]?.name,
-            categories: olBook.subjects?.map((s: any) => s.name),
-            language: 'EN'
-          };
+      const results = await Promise.all(searchPromises);
+
+      const candidates: any[] = [];
+      
+      results.forEach((data, index) => {
+        // Google Books (both isbn: and general search)
+        if (data?.items) {
+          data.items.forEach((item: any) => {
+            const info = item.volumeInfo;
+            // Basic relevance check - ensure the number appears in identifies
+            const ids = info.industryIdentifiers?.map((idx: any) => idx.identifier);
+            const isRelevant = !ids || ids.some((id: string) => isbnVariants.includes(id.replace(/[^0-9X]/gi, '')));
+            
+            if (isRelevant) {
+              candidates.push({
+                isbn: targetIsbn,
+                title: info.title || "Untitled",
+                author: info.authors ? info.authors.join(", ") : "Unknown Author",
+                publisher: info.publisher || "Unknown Publisher",
+                category: info.categories ? info.categories[0] : "General",
+                language: (info.language || "en").toUpperCase(),
+                source: `Google Books (${info.language?.toUpperCase() || 'EN'})`
+              });
+            }
+          });
+        } 
+        // Open Library (isbn: variant)
+        else if (data && index % 3 === 1) { // 1, 4, 7... are OL promises
+          const variantIdx = Math.floor(index / 3);
+          const v = isbnVariants[variantIdx];
+          const bookKey = `ISBN:${v}`;
+          if (data[bookKey]) {
+            const olBook = data[bookKey];
+            candidates.push({
+              isbn: targetIsbn,
+              title: olBook.title || "Untitled",
+              author: olBook.authors ? olBook.authors.map((a: any) => a.name).join(", ") : "Unknown Author",
+              publisher: olBook.publishers?.[0]?.name || "Unknown Publisher",
+              category: olBook.subjects ? olBook.subjects[0].name : "General",
+              language: 'EN',
+              source: 'Open Library'
+            });
+          }
         }
-      }
+      });
 
-      // 3. Ultimate Fallback: Gemini AI with Live Web Search (Excellent for Malayalam/Indian Books)
-      if (!info) {
-        setLookupStep("Launching AI Web Search (Malayalam Specialist)...");
+      // 3. Indian, Regional & Global Meta-Search: Gemini AI (If primary APIs miss)
+      if (candidates.length === 0) {
+        setLookupStep("AI Meta-Search (Checking RRDNA, ISBNLookup.org & Global Registries)...");
         try {
           const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-          const prompt = `Identify the metadata for book ISBN: ${targetIsbn.trim()}. 
-            This library contains many Malayalam books. Use search to find the correct title, authors, publisher, and category. 
-            Return the details in JSON format.`;
+          const prompt = `Identify book metadata for ISBN: ${targetIsbn}. 
+            CRITICAL SEARCH TARGETS: 
+            1. Raja Rammohun Roy National Agency (RRDNA/isbn.gov.in)
+            2. meta-search sites like ISBNLookup.org, ISBNSearch.org, and Worldcat.
+            3. Local Indian/Malayalam publishers (DC Books, Mathrubhumi).
+            
+            Find the most accurate book title, authors, publisher, category, and language. 
+            Return up to 3 likely candidates in a JSON array of objects.`;
             
           const genRes = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
@@ -553,69 +643,71 @@ export default function App() {
             config: {
               responseMimeType: "application/json",
               responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  authors: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  publisher: { type: Type.STRING },
-                  categories: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  language: { type: Type.STRING }
-                },
-                required: ["title", "authors"]
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    author: { type: Type.STRING, description: "Comma separated authors" },
+                    publisher: { type: Type.STRING },
+                    category: { type: Type.STRING },
+                    language: { type: Type.STRING }
+                  },
+                  required: ["title", "author"]
+                }
               },
               tools: [{ googleSearch: {} }]
             }
           });
 
           if (genRes.text) {
-            const aiData = JSON.parse(genRes.text);
-            if (aiData.title) {
-              info = {
-                title: aiData.title,
-                authors: aiData.authors,
-                publisher: aiData.publisher || "Unknown",
-                categories: aiData.categories || [],
-                language: aiData.language || "Malayalam"
-              };
-            }
+            const aiResults = JSON.parse(genRes.text);
+            aiResults.forEach((res: any) => {
+              candidates.push({
+                ...res,
+                isbn: targetIsbn,
+                source: 'AI Indian Agency Search',
+                language: res.language || "MALAYALAM"
+              });
+            });
           }
         } catch (aiErr) {
           console.error("AI Fallback Error:", aiErr);
         }
       }
 
-      if (!info) {
-        throw new Error("No book found for this ISBN in any global database.");
+      if (candidates.length === 0) {
+        throw new Error("No registry matches found globally or in Indian National Agency for this ISBN.");
       }
 
-      const authors = info.authors ? info.authors.join(", ") : "Unknown";
-      
-      const newBookData = {
-        isbn: targetIsbn.trim(),
-        title: info.title || "",
-        author: authors,
-        publisher: info.publisher || "",
-        category: info.categories ? info.categories[0] : "",
-        language: (info.language || "en").toUpperCase(),
-        price: "", 
-        stocknumber: "", 
-        callnumber: "", 
-        shelfnumber: "" 
-      };
-
-      setScannedBook(newBookData);
-      setShowCamera(false); 
-      setLookupStep("");
-      Swal.fire({
-        icon: 'success',
-        title: 'Book Identified!',
-        text: `${info.title} by ${authors}`,
-        timer: 2000,
-        showConfirmButton: false
+      // De-duplicate candidates based on title + author
+      const seen = new Set();
+      const uniqueResults = candidates.filter(c => {
+        const key = `${c.title}-${c.author}`.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
+
+      setLookupResults(uniqueResults);
+      setShowCamera(false); 
+
+      // If only one very solid result, we can auto-select or just show it
+      if (uniqueResults.length === 1) {
+        setScannedBook({
+          ...uniqueResults[0],
+          price: "", 
+          stocknumber: "", 
+          callnumber: "", 
+          shelfnumber: "" 
+        });
+        setLookupResults([]);
+      }
+      
+      setLookupStep("");
     } catch (err: any) {
       setLookupStep("");
-      Swal.fire("Lookup Failed", err.message || "Could not retrieve book details.", "error");
+      Swal.fire("Lookup Deficit", err.message || "No data available in national agencies.", "error");
     } finally {
       setLookupLoading(false);
     }
@@ -1247,10 +1339,10 @@ export default function App() {
               </button>
             </div>
 
-            {addMode === 'barcode' && !scannedBook && (
+            {addMode === 'barcode' && !scannedBook && lookupResults.length === 0 && (
               <div className="section-card p-12 flex flex-col items-center justify-center text-center animate-in fade-in slide-in-from-bottom-4">
-                <div className="w-24 h-24 bg-accent/10 text-accent rounded-3xl flex items-center justify-center text-4xl mb-6 animate-pulse">
-                  🧾
+                <div className="w-24 h-24 bg-accent/10 text-accent rounded-3xl flex items-center justify-center text-4xl mb-6 animate-pulse border-2 border-accent/10">
+                  📚
                 </div>
                 <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Ready for Scanning</h3>
                 <p className="text-xs text-text-muted mt-2 max-w-xs mx-auto leading-relaxed">
@@ -1328,21 +1420,83 @@ export default function App() {
                 </div>
 
                 <form onSubmit={lookupISBN} className="flex gap-2 w-full max-w-sm">
-                  <input 
-                    autoFocus
-                    placeholder="E.g. 9780141182636" 
-                    value={isbnLookup}
-                    onChange={(e) => setIsbnLookup(e.target.value)}
-                    className="input-field shadow-sm text-center font-mono tracking-widest text-lg"
-                  />
+                  <div className="relative group flex-1">
+                    <input 
+                      autoFocus
+                      placeholder="Enter ISBN Code" 
+                      value={isbnLookup}
+                      onChange={(e) => setIsbnLookup(e.target.value)}
+                      className="input-field shadow-sm text-center font-mono tracking-widest text-lg py-4 border-2 group-hover:border-accent transition-colors"
+                    />
+                    {isbnLookup && (
+                      <button 
+                        type="button" 
+                        onClick={() => setIsbnLookup("")}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-error transition-colors"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                   <button 
                     type="submit" 
                     disabled={lookupLoading}
-                    className="btn-primary px-6 py-4 disabled:opacity-50"
+                    className="btn-primary px-8 py-4 disabled:opacity-50 flex items-center gap-2"
                   >
-                    {lookupLoading ? "..." : "LOOKUP"}
+                    {lookupLoading ? "..." : <><span className="hidden md:inline">IDENTIFY</span> 🔍</>}
                   </button>
                 </form>
+              </div>
+            )}
+
+            {addMode === 'barcode' && lookupResults.length > 0 && !scannedBook && (
+              <div className="section-card p-8 animate-in zoom-in-95 duration-500">
+                <div className="flex justify-between items-center mb-8 border-b pb-4">
+                  <div>
+                    <h3 className="text-xl font-black text-slate-800">Multiple Editions Located</h3>
+                    <p className="text-[10px] uppercase font-bold text-accent tracking-[0.2em] mt-1">ISBN: {lookupResults[0].isbn}</p>
+                  </div>
+                  <button 
+                    onClick={() => setLookupResults([])}
+                    className="text-[10px] font-black uppercase text-error tracking-widest hover:underline"
+                  >
+                    Discard Results
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-1 gap-4">
+                  {lookupResults.map((candidate, idx) => (
+                    <div 
+                      key={idx}
+                      className="p-4 border-2 border-slate-100 rounded-xl hover:border-accent hover:bg-accent/5 transition-all cursor-pointer group relative flex flex-col md:flex-row md:items-center gap-4"
+                      onClick={() => {
+                        setScannedBook({
+                          ...candidate,
+                          price: "", 
+                          stocknumber: "", 
+                          callnumber: "", 
+                          shelfnumber: "" 
+                        });
+                        setLookupResults([]);
+                      }}
+                    >
+                      <div className="bg-slate-50 w-12 h-12 rounded-lg flex items-center justify-center text-xl shrink-0 group-hover:bg-accent/10 transition-colors">
+                        📖
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-bold text-slate-800 group-hover:text-accent transition-colors">{candidate.title}</h4>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          <span className="text-[10px] px-2 py-0.5 bg-slate-100 rounded font-bold text-slate-500">{candidate.author}</span>
+                          <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded font-bold italic">{candidate.source}</span>
+                          {candidate.publisher && <span className="text-[10px] px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded font-bold">Pub: {candidate.publisher}</span>}
+                        </div>
+                      </div>
+                      <div className="text-accent opacity-0 group-hover:opacity-100 transition-opacity font-black text-[10px] uppercase tracking-widest bg-accent/10 py-2 px-4 rounded-full">
+                        Select Asset
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
