@@ -7,6 +7,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, LineChart, Line, Legend 
 } from "recharts";
+import { motion, AnimatePresence } from "motion/react";
 import Papa from "papaparse";
 import Sanscript from "sanscript";
 
@@ -1327,306 +1328,494 @@ export default function App() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-grow ml-[240px] p-8 flex flex-col gap-8">
-        <header className="flex justify-between items-center bg-white p-6 rounded-2xl border border-surface-border shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center text-white text-xl">🏠</div>
-            <div>
-              <h1 className="text-2xl font-black text-primary tracking-tighter leading-none">GRAMEENA VAYANASALA KONDAZHY</h1>
-              <p className="text-[10px] text-text-muted font-black uppercase tracking-[0.2em] mt-1.5 flex items-center gap-2">
-                <span>REG NO: 1231</span>
-                <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
-                <span>Established Excellence</span>
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-col items-end">
-             <div className="db-status flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100 text-[10px] font-black tracking-widest mb-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              LIVE ENGINE
-            </div>
-            <p className="text-xl font-black text-slate-800 tracking-tighter tabular-nums">
-              {currentTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
-            </p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', weekday: 'short' })}
-            </p>
-          </div>
-        </header>
-        
-        {/* DASHBOARD */}
-        {activeTab === "dashboard" && (
-          <div className="flex flex-col gap-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {[
-                { label: "Inventory Assets", value: counts.books, color: "text-slate-900", icon: "📚" },
-                { label: "Active Members", value: counts.users, color: "text-accent", icon: "👤" },
-                { label: "Current Loans", value: counts.issued, color: "text-amber-600", icon: "🛫" }
-              ].map((stat, i) => (
-                <div key={i} className="bg-white p-6 rounded-2xl border border-surface-border shadow-sm flex flex-col justify-center">
-                  <div className="flex justify-between items-start mb-2">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{stat.label}</p>
-                    <span className="text-lg opacity-80">{stat.icon}</span>
-                  </div>
-                  <p className={`text-4xl font-black tracking-tighter ${stat.color}`}>{stat.value}</p>
-                </div>
-              ))}
-            </div>
+      <main className="flex-grow ml-[240px] flex flex-col relative mesh-bg min-h-screen">
+        {/* Decorative Background Elements */}
+        <div className="grid-pattern"></div>
+        <div className="absolute top-[-10%] right-[-5%] w-[400px] h-[400px] bg-accent/10 rounded-full blur-[100px] animate-float pointer-events-none"></div>
+        <div className="absolute bottom-[-10%] left-[10%] w-[350px] h-[350px] bg-primary/5 rounded-full blur-[80px] animate-float pointer-events-none" style={{ animationDelay: '-3s' }}></div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="section-card p-6 bg-slate-50/50 border-dashed border-2">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center text-xl">🚀</div>
-                  <div>
-                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">System Health</h3>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Postgres Instance Operational</p>
-                  </div>
-                </div>
-                <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-emerald-500 w-[94%] animate-shimmer"></div>
-                </div>
-              </div>
-              <div className="section-card p-6 bg-blue-50/50 border-dashed border-2">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center text-xl">💡</div>
-                  <div>
-                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Quick Action</h3>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Analyze overdue accounts instantly</p>
-                  </div>
-                </div>
-                <button onClick={() => setActiveTab('engagement')} className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline">Launch Hub →</button>
+        <div className="relative z-10 p-8 flex flex-col gap-8 flex-grow">
+          <header className="flex justify-between items-center glass-card p-6 rounded-3xl border border-slate-200/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+            <div className="flex items-center gap-5">
+              <motion.div 
+                whileHover={{ rotate: 15, scale: 1.1 }}
+                className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center text-white text-2xl shadow-xl shadow-primary/20"
+              >
+                🏛️
+              </motion.div>
+              <div>
+                <h1 className="text-2xl font-black text-primary tracking-tighter leading-none mb-1">GRAMEENA VAYANASALA KONDAZHY</h1>
+                <p className="text-[10px] text-text-muted font-black uppercase tracking-[0.2em] flex items-center gap-2">
+                  <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-500">REG NO: 1231</span>
+                  <span className="w-1.5 h-1.5 bg-slate-200 rounded-full"></span>
+                  <span className="opacity-60">Established Excellence</span>
+                </p>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* MEMBERS */}
-        {activeTab === "members" && (
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start">
-            {/* LEFT SECTION: FORM */}
-            <div className="lg:col-span-2 section-card p-8 border-t-4 border-t-primary shadow-xl">
-              <div className="flex items-center gap-3 mb-6 border-b border-slate-100 pb-4">
-                <div className="w-10 h-10 bg-primary/10 text-primary rounded-xl flex items-center justify-center text-lg">📝</div>
-                <div>
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Add New Member</h3>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Profile Creation Terminal</p>
-                </div>
+            <div className="flex flex-col items-end">
+               <div className="db-status flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100 text-[10px] font-black tracking-widest mb-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                CORE_ENGINE: ACTIVE
               </div>
-              
-              <form onSubmit={addUser} className="space-y-4">
-                <input name="name" placeholder="Full Name" required className="input-field" />
-                <input name="phone" placeholder="Phone" required className="input-field" />
-                <input name="address" placeholder="Address" required className="input-field" />
-                <input name="pincode" placeholder="Pincode" className="input-field" />
-                <input name="email" placeholder="Email" className="input-field" />
-                <select name="gender" className="input-field">
-                  <option value="">Select Gender</option>
-                  <option value="Male">MALE</option>
-                  <option value="Female">FEMALE</option>
-                  <option value="Others">OTHERS</option>
-                </select>
-                <input name="dob" type="date" className="input-field" />
-                <div className="flex gap-2">
-                  <input 
-                    name="member_id" 
-                    placeholder="ID" 
-                    value={genMemberId}
-                    onChange={(e) => setGenMemberId(e.target.value)}
-                    className="input-field flex-1" 
-                  />
-                  <button 
-                    type="button" 
-                    onClick={generateRandomId}
-                    className="bg-accent text-white px-3 rounded-xl text-[10px] font-bold hover:bg-accent/90 transition-all uppercase whitespace-nowrap"
-                  >
-                    Get ID
-                  </button>
-                </div>
-                <input name="occupation" placeholder="Occupation" className="input-field" />
-                
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-primary">Subscription Plan (Joining: +₹{subsJoiningFee})</p>
-                  <select name="sub_type" className="input-field text-xs uppercase" required defaultValue="monthly">
-                    <option value="monthly">MONTHLY (₹{subsMonthlyFee})</option>
-                    <option value="yearly">YEARLY (₹{subsYearlyFee})</option>
-                    <option value="lifetime">LIFETIME (₹{subsLifetimeFee})</option>
-                  </select>
-                  <input name="sub_duration" type="number" placeholder="Count (Months/Years)" defaultValue={1} className="input-field py-2 text-xs" />
-                  <p className="text-[9px] text-slate-400 italic">Duration ignored for Lifetime memberships.</p>
-                </div>
-
-                <textarea name="notes" placeholder="Notes (Optional)" className="input-field h-24" />
-                <button type="submit" className="btn-primary w-full mt-2">Create Profile</button>
-              </form>
+              <div className="flex items-center gap-3">
+                <p className="text-2xl font-black text-slate-800 tracking-tighter tabular-nums font-mono">
+                  {currentTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                </p>
+                <div className="h-4 w-[2px] bg-slate-200 rounded-full"></div>
+                <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest pt-0.5">
+                  {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                </p>
+              </div>
             </div>
-            {/* RIGHT SECTION: REGISTRY LIST */}
-            <div className="lg:col-span-3 section-card shadow-xl border border-surface-border">
-              <div className="section-header bg-slate-50/50 p-6 border-b border-surface-border">
-                <div className="flex flex-col gap-1">
-                  <h2 className="text-lg font-black text-slate-800 tracking-tight leading-none">Master Members Registry</h2>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Digital Asset Access Ledger</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => setShowMemberFilters(!showMemberFilters)}
-                    className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${showMemberFilters ? 'bg-primary text-white border-primary' : 'bg-white text-slate-500 border-surface-border'}`}
-                    title="Toggle Advanced Filters"
-                  >
-                    <span>🎯 FILTERS</span>
-                  </button>
-                  <div className="flex gap-1">
-                    <input 
-                      placeholder="Search name/phone..." 
-                      value={memberSearch}
-                      onChange={(e) => setMemberSearch(e.target.value)}
-                      className="px-3 py-1.5 border border-surface-border rounded-lg text-xs outline-none w-48"
-                    />
-                    <button 
-                      onClick={() => loadMembers()} 
-                      className="bg-primary text-white px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-md shadow-primary/20"
+          </header>
+          
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 15, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.99 }}
+              transition={{ duration: 0.4, cubicBezier: [0.16, 1, 0.3, 1] }}
+              className="flex-grow flex flex-col"
+            >
+              {/* DASHBOARD */}
+              {activeTab === "dashboard" && (
+                <div className="flex flex-col gap-8">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    {[
+                      { label: "Inventory Assets", value: counts.books, color: "text-slate-900", icon: "📚", bg: "bg-white" },
+                      { label: "Active Members", value: counts.users, color: "text-accent", icon: "👤", bg: "bg-white" },
+                      { label: "Current Loans", value: counts.issued, color: "text-amber-600", icon: "🛫", bg: "bg-white" }
+                    ].map((stat, i) => (
+                      <motion.div 
+                        key={i} 
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.1 }}
+                        whileHover={{ y: -5 }}
+                        className={`${stat.bg} p-8 rounded-[32px] border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col justify-between group hover:border-accent/30 transition-all`}
+                      >
+                        <div className="flex justify-between items-start mb-6">
+                          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 group-hover:text-accent transition-colors">{stat.label}</p>
+                          <span className="text-2xl grayscale group-hover:grayscale-0 transition-all transform group-hover:scale-125 rotate-0 group-hover:-rotate-12">{stat.icon}</span>
+                        </div>
+                        <p className={`text-5xl font-black tracking-tighter ${stat.color} mb-1 font-display`}>{stat.value}</p>
+                        <div className="h-1 w-12 bg-slate-100 rounded-full group-hover:w-full group-hover:bg-accent/20 transition-all duration-500"></div>
+                      </motion.div>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <motion.div 
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="section-card p-8 bg-white/40 backdrop-blur-md border-dashed border-2 hover:border-emerald-500/30 group"
                     >
-                      SEARCH 🔍
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {showMemberFilters && (
-                <div className="px-6 py-4 bg-slate-50 border-b border-surface-border flex flex-wrap gap-4 animate-in slide-in-from-top-2 duration-200">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Subscription Type</label>
-                    <select 
-                      value={memberFilterSub} 
-                      onChange={(e) => setMemberFilterSub(e.target.value)}
-                      className="px-3 py-1.5 border border-surface-border rounded-lg text-xs outline-none bg-white min-w-[120px]"
+                      <div className="flex items-center gap-4 mb-6">
+                        <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-2xl group-hover:rotate-[360deg] transition-transform duration-700">⚡</div>
+                        <div>
+                          <h3 className="text-base font-black text-slate-800 uppercase tracking-tight">System Integrity</h3>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Postgres Protocol: Operational</p>
+                        </div>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden mb-2">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: "94%" }}
+                          transition={{ duration: 1.5, ease: "easeOut" }}
+                          className="h-full bg-emerald-500 relative"
+                        >
+                          <div className="absolute inset-0 bg-white/20 animate-shimmer"></div>
+                        </motion.div>
+                      </div>
+                      <p className="text-[9px] text-emerald-600 font-black tracking-widest text-right uppercase">Uptime: 99.98%</p>
+                    </motion.div>
+                    
+                    <motion.div 
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="section-card p-8 bg-white/40 backdrop-blur-md border-dashed border-2 hover:border-blue-500/30 group"
                     >
-                      <option value="all">ALL PLANS</option>
-                      <option value="MONTHLY">MONTHLY</option>
-                      <option value="YEARLY">YEARLY</option>
-                      <option value="LIFETIME">LIFETIME</option>
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Joining Date</label>
-                    <input 
-                      type="date" 
-                      value={memberFilterDate} 
-                      onChange={(e) => setMemberFilterDate(e.target.value)}
-                      className="px-3 py-1.5 border border-surface-border rounded-lg text-xs outline-none bg-white"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button 
-                      onClick={() => {
-                        setMemberSearch("");
-                        setMemberFilterSub("all");
-                        setMemberFilterDate("");
-                      }}
-                      className="px-4 py-1.5 bg-slate-200 text-slate-600 text-[10px] font-black rounded-lg uppercase tracking-widest hover:bg-slate-300 transition-all"
-                    >
-                      Reset
-                    </button>
+                      <div className="flex items-center gap-4 mb-6">
+                        <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center text-2xl group-hover:animate-bounce">💡</div>
+                        <div>
+                          <h3 className="text-base font-black text-slate-800 uppercase tracking-tight">Administrative Intelligence</h3>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Actionable Insights Generated</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => setActiveTab('engagement')} 
+                        className="w-full py-3 bg-blue-600 text-white text-[11px] font-black uppercase tracking-[0.2em] rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
+                      >
+                        Launch Hub Connection →
+                      </button>
+                    </motion.div>
                   </div>
                 </div>
               )}
 
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="table-header">Full Name</th>
-                    <th className="table-header">Subscription</th>
-                    <th className="table-header text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {members.map(u => (
-                    <tr key={u.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="table-cell">
-                        <div className="font-semibold">{u.name}</div>
-                        <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{u.phone}</div>
-                      </td>
-                      <td className="table-cell">
-                        <span className={`text-[9px] px-2 py-0.5 rounded-full font-black tracking-[0.1em] ${
-                          u.subscription?.includes('LIFETIME') ? 'bg-amber-100 text-amber-700' :
-                          u.subscription?.includes('YEARLY') ? 'bg-emerald-100 text-emerald-700' :
-                          'bg-blue-100 text-primary'
-                        }`}>
-                          {u.subscription || "PENDING"}
-                        </span>
-                      </td>
-                      <td className="table-cell text-right space-x-2">
-                        <button onClick={() => setEditMemberModal(u)} className="text-accent font-bold text-xs hover:underline">EDIT</button>
-                        <button onClick={() => deleteMember(u.id)} className="text-error font-bold text-xs hover:underline">DEL</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {activeTab === "members" && (
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-10 items-start h-full p-2">
+            {/* LEFT WINDOW: ADD MEMBER */}
+            <div className="lg:col-span-2 bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-slate-200 overflow-hidden flex flex-col h-full animate-in fade-in slide-in-from-left-6 duration-700">
+              {/* Window Title Bar */}
+              <div className="bg-primary px-5 py-4 flex justify-between items-center select-none shadow-md relative z-10">
+                <div className="flex gap-2">
+                  <div className="w-3.5 h-3.5 rounded-full bg-[#FF5F56] shadow-inner shadow-black/20 hover:brightness-110 cursor-pointer"></div>
+                  <div className="w-3.5 h-3.5 rounded-full bg-[#FFBD2E] shadow-inner shadow-black/20 hover:brightness-110 cursor-pointer"></div>
+                  <div className="w-3.5 h-3.5 rounded-full bg-[#27C93F] shadow-inner shadow-black/20 hover:brightness-110 cursor-pointer"></div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black tracking-[0.4em] text-white/50 uppercase">MEMBER_ENROLL_VX</span>
+                </div>
+                <div className="w-12"></div>
+              </div>
+              
+              <div className="p-8 overflow-y-auto custom-scrollbar bg-white">
+                <div className="flex items-center gap-4 mb-8 border-b-2 border-slate-50 pb-6 relative">
+                  <div className="w-14 h-14 bg-primary text-white rounded-[20px] flex items-center justify-center text-2xl shadow-xl shadow-primary/30 transform -rotate-3 hover:rotate-0 transition-transform">📝</div>
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Onboard Member</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mt-1">Registry Entry Protocol v3.0</p>
+                  </div>
+                  <div className="absolute right-0 top-0 opacity-5 pointer-events-none">
+                    <span className="text-6xl font-black italic">NEW</span>
+                  </div>
+                </div>
+                
+                <form onSubmit={addUser} className="space-y-6">
+                  <div className="space-y-5">
+                    <div className="group">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Full Legal Identity</label>
+                      <input name="name" placeholder="Enter Member Full Name" required className="input-field py-4 bg-slate-50/50 focus:bg-white" />
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="group text-left">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Telecom ID</label>
+                        <input name="phone" placeholder="+91 XXXX..." required className="input-field py-4 bg-slate-50/50 focus:bg-white" />
+                      </div>
+                      <div className="group text-left">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Birth Sequence</label>
+                        <input name="dob" type="date" className="input-field py-4 bg-slate-50/50 focus:bg-white" />
+                      </div>
+                    </div>
+
+                    <div className="group text-left">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Physical Domicile</label>
+                      <input name="address" placeholder="Residential Address..." required className="input-field py-4 bg-slate-50/50 focus:bg-white" />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="group text-left">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Postal Zone</label>
+                        <input name="pincode" placeholder="680XXX" className="input-field py-4 bg-slate-50/50 focus:bg-white" />
+                      </div>
+                      <div className="group text-left">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Unique Key ID</label>
+                        <div className="flex gap-2">
+                          <input 
+                            name="member_id" 
+                            placeholder="GEN_ID" 
+                            value={genMemberId}
+                            onChange={(e) => setGenMemberId(e.target.value)}
+                            className="input-field flex-1 text-center font-mono py-4 bg-slate-50/50 focus:bg-white" 
+                          />
+                          <button 
+                            type="button" 
+                            onClick={generateRandomId}
+                            className="bg-primary/10 text-primary px-4 rounded-2xl hover:bg-primary hover:text-white transition-all shadow-sm"
+                            title="Regenerate ID"
+                          >
+                            🔄
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-6 bg-slate-900 rounded-3xl border-l-[6px] border-l-accent space-y-5 shadow-inner">
+                    <div className="flex justify-between items-center">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-accent flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-accent animate-ping"></span>
+                        Service Tier Authorization
+                      </p>
+                      <span className="text-[10px] text-white/40 font-mono tracking-tighter">REF_SYS_77</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <select name="sub_type" className="input-field py-4 text-xs uppercase bg-slate-800 border-slate-700 text-white focus:border-accent" required defaultValue="monthly">
+                        <option value="monthly">MONTHLY PLAN</option>
+                        <option value="yearly">YEARLY PLAN</option>
+                        <option value="lifetime">LIFETIME ACCESS</option>
+                      </select>
+                      <div className="relative">
+                        <input name="sub_duration" type="number" placeholder="Duration" defaultValue={1} className="input-field py-4 text-xs bg-slate-800 border-slate-700 text-white focus:border-accent w-full" />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[9px] text-white/30 font-bold uppercase tracking-widest pointer-events-none">Units</span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                       <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Initialization Fee</p>
+                       <p className="text-sm font-black text-white tracking-widest tabular-nums">₹{subsJoiningFee}</p>
+                    </div>
+                  </div>
+
+                  <button type="submit" className="w-full py-5 bg-primary text-white rounded-3xl text-sm font-black tracking-[0.2em] uppercase shadow-[0_15px_40px_rgba(15,23,42,0.3)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3">
+                    🚀 Commit Member to Database
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {/* RIGHT WINDOW: REGISTRY LIST */}
+            <div className="lg:col-span-3 bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-slate-200 overflow-hidden flex flex-col h-full animate-in fade-in slide-in-from-right-6 duration-700">
+              {/* Window Title Bar */}
+              <div className="bg-slate-800 px-5 py-4 flex justify-between items-center select-none shadow-md relative z-10">
+                <div className="flex gap-2">
+                  <div className="w-3.5 h-3.5 rounded-full bg-slate-600/50"></div>
+                  <div className="w-3.5 h-3.5 rounded-full bg-slate-600/50"></div>
+                  <div className="w-3.5 h-3.5 rounded-full bg-slate-600/50"></div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black tracking-[0.4em] text-white/30 uppercase">DATA_EXPLORER_VIEW</span>
+                </div>
+                <div className="flex gap-2">
+                   <div className="w-10 h-0.5 bg-slate-700 rounded-full"></div>
+                   <div className="w-3 h-3 border-2 border-slate-700 rounded shadow-sm"></div>
+                </div>
+              </div>
+
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="p-8 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                  <div className="flex flex-col gap-1 text-left">
+                    <h2 className="text-2xl font-black text-slate-900 tracking-tighter leading-none">Database Registry</h2>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1.5 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                      Digital Core Access Ledger
+                    </p>
+                  </div>
+                  
+                  <div className="flex items-center gap-4">
+                    <button 
+                      onClick={() => setShowMemberFilters(!showMemberFilters)}
+                      className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${showMemberFilters ? 'bg-primary text-white scale-105' : 'bg-white text-slate-600 border-2 border-slate-100 hover:border-primary/30'}`}
+                    >
+                      {showMemberFilters ? '⚙️ ACTIVE' : '🔍 FILTERS'}
+                    </button>
+                    <div className="relative group">
+                      <input 
+                        placeholder="Search Identity..." 
+                        value={memberSearch}
+                        onChange={(e) => setMemberSearch(e.target.value)}
+                        className="pl-12 pr-6 py-3 bg-white border-2 border-slate-100 rounded-2xl text-xs outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all w-80 shadow-sm"
+                      />
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg opacity-40 group-focus-within:opacity-100 transition-opacity">📂</span>
+                    </div>
+                  </div>
+                </div>
+
+                {showMemberFilters && (
+                  <div className="px-8 py-6 bg-slate-100 border-b border-slate-200 grid grid-cols-3 gap-6 animate-in slide-in-from-top-6 duration-500 z-10 relative">
+                    <div className="text-left">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2 px-1">Access Tier Filter</label>
+                      <select 
+                        value={memberFilterSub} 
+                        onChange={(e) => setMemberFilterSub(e.target.value)}
+                        className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl text-xs outline-none focus:border-primary transition-all shadow-sm"
+                      >
+                        <option value="all">ALL PLANS</option>
+                        <option value="MONTHLY">MONTHLY TIER</option>
+                        <option value="YEARLY">YEARLY TIER</option>
+                        <option value="LIFETIME">LIFETIME TIER</option>
+                      </select>
+                    </div>
+                    <div className="text-left">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2 px-1">Registry Enrollment Date</label>
+                      <input 
+                        type="date" 
+                        value={memberFilterDate} 
+                        onChange={(e) => setMemberFilterDate(e.target.value)}
+                        className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl text-xs outline-none focus:border-primary transition-all shadow-sm"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <button 
+                        onClick={() => { setMemberSearch(""); setMemberFilterSub("all"); setMemberFilterDate(""); }}
+                        className="w-full py-3 bg-slate-200 text-slate-500 font-black text-[10px] uppercase rounded-xl hover:bg-slate-300 transition-all shadow-sm tracking-[0.2em]"
+                      >
+                        PURGE LOGIC 🔄
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar bg-white">
+                  <table className="w-full border-separate border-spacing-0">
+                    <thead className="sticky top-0 bg-white/95 backdrop-blur-xl z-10">
+                      <tr className="shadow-sm">
+                        <th className="px-8 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100">Core Identity</th>
+                        <th className="px-8 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100">Authorization Tier</th>
+                        <th className="px-8 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100">Command Control</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {members.map((u, idx) => (
+                        <motion.tr 
+                          key={u.id} 
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: idx * 0.03 }}
+                          className="group hover:bg-slate-50/50 transition-all duration-300"
+                        >
+                          <td className="px-8 py-6">
+                            <div className="flex items-center gap-4">
+                              <div className="w-12 h-12 bg-slate-100 rounded-[18px] flex items-center justify-center text-lg font-black text-slate-400 group-hover:bg-primary group-hover:text-white group-hover:rotate-12 group-hover:scale-110 transition-all shadow-sm">
+                                {u.name?.[0].toUpperCase()}
+                              </div>
+                              <div className="text-left">
+                                <div className="font-black text-slate-800 group-hover:text-primary transition-colors text-base tracking-tight">{u.name}</div>
+                                <div className="text-[11px] text-slate-400 font-mono tracking-widest mt-0.5">{u.phone}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-8 py-6">
+                            <div className="flex items-center gap-3">
+                              <span className={`text-[9px] px-4 py-1.5 rounded-full font-black tracking-[0.2em] uppercase shadow-lg ${
+                                u.subscription?.includes('LIFETIME') ? 'bg-gradient-to-r from-amber-600 to-amber-400 text-white shadow-amber-500/30' :
+                                u.subscription?.includes('YEARLY') ? 'bg-gradient-to-r from-emerald-600 to-emerald-400 text-white shadow-emerald-500/30' :
+                                'bg-gradient-to-r from-primary to-slate-700 text-white shadow-primary/30'
+                              }`}>
+                                {u.subscription || "INACTIVE_SYSTEM"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-8 py-6">
+                            <div className="flex justify-end gap-3 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 translate-x-4 transition-all pr-4">
+                              <button 
+                                onClick={() => setEditMemberModal(u)} 
+                                className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all" 
+                                title="Update Sequence"
+                              >
+                                ✏️
+                              </button>
+                              <button 
+                                onClick={() => deleteMember(u.id)} 
+                                className="w-10 h-10 flex items-center justify-center bg-red-50 border border-red-100 text-red-500 rounded-xl hover:bg-red-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" 
+                                title="Purge Record"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {members.length === 0 && (
+                    <div className="p-20 text-center">
+                        <motion.div 
+                          animate={{ rotate: [0, 10, -10, 0] }}
+                          transition={{ repeat: Infinity, duration: 4 }}
+                          className="text-4xl mb-4 opacity-20"
+                        >📂</motion.div>
+                        <p className="text-[10px] font-black uppercase text-slate-300 tracking-[0.3em]">No data matching criteria found.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         )}
 
         {/* BOOKS SEARCH */}
         {activeTab === "books" && (
-          <div className="section-card flex flex-col">
-            <div className="section-header">
-              <h2>Inventory Search</h2>
-              <div className="flex gap-2">
-                <select 
-                  value={searchType} 
-                  onChange={(e) => setSearchType(e.target.value)}
-                  className="bg-slate-50 border border-surface-border px-2 py-1 rounded text-xs outline-none"
-                >
-                  <option value="title">Title</option>
-                  <option value="author">Author</option>
-                  <option value="stocknumber">Stock</option>
-                </select>
-                <input 
-                  placeholder="Filter inventory..." 
-                  value={bookSearch} 
-                  onChange={(e) => setBookSearch(e.target.value)} 
-                  onKeyUp={searchBooks}
-                  className="px-3 py-1 border border-surface-border rounded-lg text-xs outline-none w-48"
-                />
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="table-header">Stock #</th>
-                    <th className="table-header">Title & Author</th>
-                    <th className="table-header">Shelf</th>
-                    <th className="table-header text-center">Status</th>
-                    <th className="table-header text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {books.map(b => (
-                    <tr key={b.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="table-cell font-mono text-[11px] text-text-muted">{b.stocknumber}</td>
-                      <td className="table-cell">
-                        <div className="font-bold text-slate-900">{b.title}</div>
-                        <div className="text-[11px] text-slate-600 font-medium">{b.author}</div>
-                        {b.publisher && <div className="text-[9px] text-text-muted italic opacity-70 mt-0.5">{b.publisher}</div>}
-                      </td>
-                      <td className="table-cell font-bold text-accent">{b.shelfnumber || "—"}</td>
-                      <td className="table-cell text-center">
-                        <span className={`status-pill ${
-                          b.status === 'available' ? 'bg-emerald-100 text-emerald-700' :
-                          b.status === 'issued' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
-                        }`}>
-                          {b.label}
-                        </span>
-                      </td>
-                      <td className="table-cell text-right space-x-3">
-                        <button onClick={() => setEditBookModal(b)} className="text-accent font-bold text-xs hover:underline">EDIT</button>
-                        <button onClick={() => deleteBook(b.stocknumber)} className="text-error font-bold text-xs hover:underline">DEL</button>
-                      </td>
+          <div className="flex flex-col gap-8">
+            <motion.header 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex justify-between items-end"
+            >
+               <div className="flex flex-col gap-2 text-left">
+                 <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">Inventory Ledger</h2>
+                 <div className="flex items-center gap-3">
+                   <div className="w-8 h-0.5 bg-accent rounded-full"></div>
+                   <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.3em] leading-none">Catalogued Assets Repository</p>
+                 </div>
+               </div>
+               <div className="flex items-center gap-4">
+                  <div className="relative group">
+                    <input 
+                      placeholder="SCAN OR TYPE SEARCH..." 
+                      value={bookSearch}
+                      onChange={(e) => setBookSearch(e.target.value)}
+                      onKeyUp={searchBooks}
+                      className="pl-14 pr-6 py-4 bg-white border-2 border-slate-100 rounded-2xl text-xs outline-none focus:border-accent transition-all w-96 shadow-lg shadow-primary/5 uppercase font-black tracking-widest placeholder:opacity-30"
+                    />
+                    <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl grayscale group-focus-within:grayscale-0 transition-all">🔍</span>
+                  </div>
+                  <motion.button 
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setActiveTab('addBook')} 
+                    className="btn-primary px-8 shadow-xl shadow-primary/20 h-[56px]"
+                  >
+                    <span className="text-lg">📖</span> NEW ASSET
+                  </motion.button>
+               </div>
+            </motion.header>
+
+            <div className="section-card bg-white/70 backdrop-blur-md">
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="w-full border-separate border-spacing-0">
+                  <thead className="sticky top-0 bg-white/95 backdrop-blur-xl z-20">
+                    <tr className="shadow-sm">
+                      <th className="table-header w-20 text-center">SEQ</th>
+                      <th className="table-header">Title & Authority</th>
+                      <th className="table-header">Categorization</th>
+                      <th className="table-header">Registry Locators</th>
+                      <th className="table-header text-right">Valuation</th>
+                      <th className="table-header text-right pr-8">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {books.map((b, idx) => (
+                      <motion.tr 
+                        key={b.id} 
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.02 }}
+                        className="group hover:bg-slate-50/80 transition-all"
+                      >
+                        <td className="px-6 py-6 text-[11px] font-mono text-slate-400 font-black text-center">{idx + 1}</td>
+                        <td className="px-6 py-6">
+                          <div className="flex flex-col text-left">
+                            <span className="font-black text-slate-800 text-base tracking-tight group-hover:text-primary transition-colors">{b.title}</span>
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{b.author}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-6 text-left">
+                          <span className="text-[9px] bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full font-black uppercase tracking-widest group-hover:bg-accent/10 group-hover:text-accent transition-colors">
+                            {b.genre || "GENERAL_STOCK"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-6 text-left">
+                          <div className="flex items-center gap-3">
+                            <div className="p-1.5 px-2.5 bg-primary/5 rounded-xl border border-primary/5 text-[9px] font-mono text-primary font-black">S:{b.shelfnumber || '—'}</div>
+                            <div className="p-1.5 px-2.5 bg-accent/5 rounded-xl border border-accent/5 text-[9px] font-mono text-accent font-black">C:{b.callnumber || '—'}</div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-6 text-right font-mono text-[13px] font-black text-slate-500 tabular-nums">₹{b.price || '0.00'}</td>
+                        <td className="px-6 py-6 text-right pr-8">
+                           <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0">
+                              <button onClick={() => setEditBookModal(b)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-2xl hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all" title="Modify Registry">✏️</button>
+                              <button onClick={() => deleteBook(b.stocknumber)} className="w-10 h-10 flex items-center justify-center bg-red-50 border border-red-100 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" title="Purge Asset">🗑️</button>
+                           </div>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -2614,8 +2803,10 @@ export default function App() {
             </div>
           </div>
         )}
-
-      </main>
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </main>
 
       {/* MODALS */}
       {lookupLoading && (

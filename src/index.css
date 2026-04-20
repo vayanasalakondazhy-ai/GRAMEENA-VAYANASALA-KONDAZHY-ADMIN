@@ -1,54 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  
-  --color-primary: #1e293b;
-  --color-accent: #2563eb;
-  --color-success: #10b981;
-  --color-warning: #f59e0b;
-  --color-error: #ef4444;
-  --color-surface-bg: #f8fafc;
-  --color-surface-border: #e2e8f0;
-  --color-text-main: #0f172a;
-  --color-text-muted: #64748b;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  @keyframes shimmer {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(100%); }
-  }
-  --animate-shimmer: shimmer 2s infinite linear;
+  --color-primary: #0F172A;
+  --color-accent: #0EA5E9;
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-error: #EF4444;
+  --color-surface-bg: #F8FAFC;
+  --color-surface-border: #E2E8F0;
+  --color-text-main: #1E293B;
+  --color-text-muted: #64748B;
 }
 
 @layer base {
   body {
-    @apply bg-surface-bg text-text-main font-sans;
+    @apply antialiased text-text-main bg-slate-50 selection:bg-accent selection:text-white transition-colors duration-500 overflow-x-hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-bold tracking-tight;
   }
 }
 
 @layer components {
+  .input-field {
+    @apply w-full border-2 border-slate-200 rounded-2xl px-4 py-3 text-sm focus:border-accent focus:ring-4 focus:ring-accent/5 outline-none transition-all placeholder:text-slate-400 placeholder:font-medium;
+  }
+  
+  .btn-primary {
+    @apply bg-primary text-white rounded-2xl px-6 py-3 text-sm font-bold tracking-wide hover:bg-slate-800 active:scale-[0.98] transition-all shadow-lg shadow-primary/10 flex items-center justify-center gap-2;
+  }
+
+  .glass-card {
+    @apply bg-white/70 backdrop-blur-xl border border-white/20 shadow-xl;
+  }
+
+  .mesh-bg {
+    @apply relative overflow-hidden;
+    background-color: #f8fafc;
+    background-image: 
+      radial-gradient(at 0% 0%, hsla(201,100%,92%,1) 0, transparent 50%), 
+      radial-gradient(at 50% 0%, hsla(220,100%,95%,1) 0, transparent 50%), 
+      radial-gradient(at 100% 0%, hsla(190,100%,93%,1) 0, transparent 50%);
+  }
+
+  .grid-pattern {
+    @apply absolute inset-0 pointer-events-none;
+    background-image: radial-gradient(#64748b 0.5px, transparent 0.5px);
+    background-size: 32px 32px;
+    opacity: 0.15;
+  }
+
   .section-card {
-    @apply bg-white rounded-xl border border-surface-border shadow-sm overflow-hidden;
+    @apply bg-white rounded-3xl border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden transition-all duration-300 hover:shadow-[0_20px_50px_rgb(0,0,0,0.08)] hover:-translate-y-1;
   }
   
   .table-header {
-    @apply bg-slate-100 text-text-muted text-xs font-semibold uppercase tracking-wider text-left p-3 border-b border-surface-border;
+    @apply px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100 bg-slate-50/50;
   }
-  
-  .table-cell {
-    @apply p-4 border-b border-surface-border text-sm;
-  }
+}
 
-  .btn-primary {
-    @apply bg-accent hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors shadow-sm;
-  }
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 rounded-full hover:bg-slate-400 transition-colors;
+}
 
-  .input-field {
-    @apply w-full p-2 bg-white rounded-lg border border-surface-border focus:ring-2 focus:ring-accent/20 focus:border-accent outline-none transition-all placeholder:text-text-muted/50;
-  }
+/* Tab Transitions */
+.tab-content-enter {
+  animation: tabFadeSlide 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
 
-  .status-pill {
-    @apply px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-tight;
-  }
+@keyframes tabFadeSlide {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
 }
 
