@@ -1244,7 +1244,7 @@ export default function App() {
           <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M4 6h18v2H4V6zm0 5h18v2H4v-2zm0 5h18v2H4v-2z"/></svg>
           </div>
-          <span className="text-xl font-bold tracking-tight">Vayanashala</span>
+          <span className="text-xl font-bold tracking-tight">LIBRARY</span>
         </div>
         <div className="px-6 mb-6">
           <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest leading-none">Management Console</p>
