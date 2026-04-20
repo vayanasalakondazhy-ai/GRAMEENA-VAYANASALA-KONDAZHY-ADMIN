@@ -25,6 +25,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^3.8.1",
+    "sanscript": "^0.0.2",
     "sweetalert2": "^11.26.24",
     "vite": "^6.2.0"
   },

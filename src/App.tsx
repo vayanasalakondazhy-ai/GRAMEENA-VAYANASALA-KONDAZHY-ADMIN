@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { useEffect, useState, useCallback, useRef, FormEvent } from "react";
+import React, { useEffect, useState, useCallback, useRef, FormEvent } from "react";
 import Swal from "sweetalert2";
 import { GoogleGenAI, Type } from "@google/genai";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
@@ -8,6 +8,7 @@ import {
   PieChart, Pie, Cell, LineChart, Line, Legend 
 } from "recharts";
 import Papa from "papaparse";
+import Sanscript from "sanscript";
 
 // Supabase Client
 const supabaseUrl = "https://bfrgzovowzrmnygoxnsn.supabase.co";
@@ -20,6 +21,9 @@ export default function App() {
   const [counts, setCounts] = useState({ books: 0, users: 0, issued: 0 });
   const [members, setMembers] = useState<any[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
+  const [showMemberFilters, setShowMemberFilters] = useState(false);
+  const [memberFilterSub, setMemberFilterSub] = useState("all");
+  const [memberFilterDate, setMemberFilterDate] = useState("");
   const [books, setBooks] = useState<any[]>([]);
   const [bookSearch, setBookSearch] = useState("");
   const [searchType, setSearchType] = useState("title");
@@ -42,6 +46,11 @@ export default function App() {
   const [viewUserModal, setViewUserModal] = useState<any>(null);
   const [genMemberId, setGenMemberId] = useState("");
   const [borrowingLimit, setBorrowingLimit] = useState(3);
+  const [fineAmount, setFineAmount] = useState(1); // Default 1 currency unit per day
+  const [subsMonthlyFee, setSubsMonthlyFee] = useState(10);
+  const [subsYearlyFee, setSubsYearlyFee] = useState(100);
+  const [subsLifetimeFee, setSubsLifetimeFee] = useState(1000);
+  const [subsJoiningFee, setSubsJoiningFee] = useState(10);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [addMode, setAddMode] = useState<"manual" | "barcode">("manual");
   const [isbnLookup, setIsbnLookup] = useState("");
@@ -91,6 +100,147 @@ export default function App() {
     return localStorage.getItem("lib_admin_auth") === "true";
   });
   const [passwordInput, setPasswordInput] = useState("");
+  const [isManglishEnabled, setIsManglishEnabled] = useState(false);
+  const [focusedInput, setFocusedInput] = useState<HTMLInputElement | null>(null);
+  const [showVirtualKeyboard, setShowVirtualKeyboard] = useState(false);
+  const [activeKbTab, setActiveKbTab] = useState<'vowels' | 'consonants' | 'conjuncts' | 'extras'>('vowels');
+
+  // Comprehensive Malayalam Character Map
+  const manglishMap = {
+    vowels: [
+      { e: 'a', m: 'അ' }, { e: 'aa', m: 'ആ' }, { e: 'i', m: 'ഇ' }, { e: 'ee', m: 'ഈ' },
+      { e: 'u', m: 'ഉ' }, { e: 'oo', m: 'ഊ' }, { e: 'R', m: 'ഋ' }, { e: 'RR', m: 'ൠ' },
+      { e: 'lR', m: 'ഌ' }, { e: 'lRR', m: 'ൡ' },
+      { e: 'e', m: 'എ' }, { e: 'E', m: 'ഏ' }, { e: 'ai', m: 'ഐ' }, 
+      { e: 'o', m: 'ഒ' }, { e: 'O', m: 'ഓ' }, { e: 'ou', m: 'ഔ' }
+    ],
+    signs: [
+      { e: '-aa', m: 'ാ' }, { e: '-i', m: 'ി' }, { e: '-ee', m: 'ീ' }, { e: '-u', m: 'ു' },
+      { e: '-uu', m: 'ൂ' }, { e: '-R', m: 'ൃ' }, { e: '-RR', m: 'ൄ' }, { e: '-e', m: 'െ' }, 
+      { e: '-E', m: 'േ' }, { e: '-ai', m: 'ൈ' }, { e: '-o', m: 'ൊ' }, { e: '-O', m: 'ോ' }, 
+      { e: '-au', m: 'ൌ' }, { e: '-auu', m: 'ൗ' }, { e: '്', m: '്' }, { e: 'am', m: 'ം' }, 
+      { e: 'H', m: 'ഃ' }, { e: "'", m: 'ഽ' }
+    ],
+    consonants: [
+      { e: 'k', m: 'ക' }, { e: 'kh', m: 'ഖ' }, { e: 'g', m: 'ഗ' }, { e: 'gh', m: 'ഘ' }, { e: 'ng', m: 'ങ' },
+      { e: 'ch', m: 'ച' }, { e: 'chh', m: 'ഛ' }, { e: 'j', m: 'ജ' }, { e: 'jh', m: 'ഝ' }, { e: 'ny', m: 'ഞ' },
+      { e: 'T', m: 'ട' }, { e: 'Th', m: 'ഠ' }, { e: 'D', m: 'ഡ' }, { e: 'Dh', m: 'ഢ' }, { e: 'N', m: 'ണ' },
+      { e: 't', m: 'ത' }, { e: 'th', m: 'ഥ' }, { e: 'd', m: 'ദ' }, { e: 'dh', m: 'ധ' }, { e: 'n', m: 'ന' },
+      { e: 'p', m: 'പ' }, { e: 'ph', m: 'ഫ' }, { e: 'b', m: 'ബ' }, { e: 'bh', m: 'ഭ' }, { e: 'm', m: 'മ' },
+      { e: 'y', m: 'യ' }, { e: 'r', m: 'ര' }, { e: 'l', m: 'ല' }, { e: 'v', m: 'വ' }, { e: 'sh', m: 'ശ' },
+      { e: 'S', m: 'ഷ' }, { e: 's', m: 'സ' }, { e: 'h', m: 'ഹ' }, 
+      { e: 'L', m: 'ള' }, { e: 'zh', m: 'ഴ' }, { e: 'R', m: 'റ' }
+    ],
+    conjuncts: [
+      { e: 'kk', m: 'ക്ക' }, { e: 'ngng', m: 'ങ്ങ' }, { e: 'cch', m: 'ച്ച' }, { e: 'njnj', m: 'ഞ്ഞ' },
+      { e: 'tt', m: 'ട്ട' }, { e: 'nn', m: 'ണ്ണ' }, { e: 'thth', m: 'ത്ത' }, { e: 'nn', m: 'ന്ന' },
+      { e: 'pp', m: 'പ്പ' }, { e: 'mm', m: 'മ്മ' }, { e: 'yy', m: 'യ്യ' }, { e: 'll', m: 'ല്ല' },
+      { e: 'vv', m: 'വ്വ' }, { e: 'ss', m: 'സ്സ' }, { e: 'LL', m: 'ള്ള' }, { e: 'nt', m: 'ന്റ' },
+      { e: 'nth', m: 'ന്ത' }, { e: 'nd', m: 'ണ്ട' }, { e: 'mp', m: 'മ്പ്' }, { e: 'rk', m: 'ർക്ക' }
+    ],
+    chillu: [
+      { e: 'n', m: 'ൻ' }, { e: 'N', m: 'ൺ' }, { e: 'r', m: 'ർ' }, { e: 'l', m: 'ൽ' }, { e: 'L', m: 'ൾ' }, { e: 'k', m: 'ൿ' }
+    ],
+    symbols: [
+      { e: '10', m: '൰' }, { e: '100', m: '൱' }, { e: '1000', m: '൲' }, 
+      { e: 'Rs', m: '൹' }, { e: 'Yr', m: '൏' }, { e: 'Dot', m: 'ൎ' },
+      { e: 'ZWJ', m: '\u200D' }, { e: 'ZWNJ', m: '\u200C' }
+    ],
+    digits: [
+      { e: '0', m: '൦' }, { e: '1', m: '൧' }, { e: '2', m: '൨' }, { e: '3', m: '൩' }, { e: '4', m: '൪' },
+      { e: '5', m: '൫' }, { e: '6', m: '൬' }, { e: '7', m: '൭' }, { e: '8', m: '൮' }, { e: '9', m: '൯' }
+    ]
+  };
+
+  const handleKeyClick = (char: string) => {
+    if (focusedInput) {
+      const start = focusedInput.selectionStart || 0;
+      const end = focusedInput.selectionEnd || 0;
+      const val = focusedInput.value;
+      const newVal = val.substring(0, start) + char + val.substring(end);
+      
+      // Update value manually since React won't see it via focusedInput.value assignment
+      // Actually, we should handle this via a more React-friendly way if possible, 
+      // but for on-screen keyboards acting on native inputs, this is common.
+      focusedInput.value = newVal;
+      
+      // Trigger change event for React forms
+      const event = new Event('input', { bubbles: true });
+      focusedInput.dispatchEvent(event);
+      
+      // Set selection back
+      setTimeout(() => {
+        focusedInput.focus();
+        focusedInput.setSelectionRange(start + char.length, start + char.length);
+      }, 0);
+    }
+  };
+
+  const handleBackspace = () => {
+    if (focusedInput) {
+      const start = focusedInput.selectionStart || 0;
+      const end = focusedInput.selectionEnd || 0;
+      const val = focusedInput.value;
+      if (start === end && start > 0) {
+        focusedInput.value = val.substring(0, start - 1) + val.substring(end);
+        focusedInput.setSelectionRange(start - 1, start - 1);
+      } else {
+        focusedInput.value = val.substring(0, start) + val.substring(end);
+        focusedInput.setSelectionRange(start, start);
+      }
+      const event = new Event('input', { bubbles: true });
+      focusedInput.dispatchEvent(event);
+    }
+  };
+
+  const handleInputFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    if (isManglishEnabled) {
+      setFocusedInput(e.target);
+      setShowVirtualKeyboard(true);
+    }
+  };
+
+  // Phonetic Transliteration Effect (On Enter)
+  useEffect(() => {
+    if (!isManglishEnabled || !focusedInput) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        const input = e.target as HTMLInputElement;
+        const value = input.value;
+        
+        // Transliterate the entire value from ITRANS (Manglish) to Malayalam
+        const transliterated = Sanscript.t(value, 'itrans', 'malayalam');
+        
+        if (transliterated !== value) {
+          // Prevent form submission if we just converted text
+          e.preventDefault();
+          input.value = transliterated;
+          
+          // Trigger change event for React forms to sync state
+          const event = new Event('input', { bubbles: true });
+          input.dispatchEvent(event);
+
+          // Toast notification for feedback
+          Swal.fire({
+            title: 'Converted to Malayalam',
+            toast: true,
+            position: 'top-end',
+            showConfirmButton: false,
+            timer: 1500,
+            timerProgressBar: true,
+            background: '#0F172A',
+            color: '#fff',
+            icon: 'info'
+          });
+        }
+      }
+    };
+
+    focusedInput.addEventListener('keydown', handleKeyDown as any);
+    return () => focusedInput.removeEventListener('keydown', handleKeyDown as any);
+  }, [isManglishEnabled, focusedInput]);
+
 
   const handleLogin = (e: FormEvent) => {
     e.preventDefault();
@@ -147,13 +297,24 @@ export default function App() {
   const loadMembers = useCallback(async () => {
     const { data } = await supabase.from("users").select("*");
     if (data) {
-      const filtered = data.filter(u => 
-        (u.name || "").toLowerCase().includes(memberSearch.toLowerCase()) ||
-        (u.phone || "").includes(memberSearch)
-      );
+      const filtered = data.filter(u => {
+        const name = (u.name || "").toLowerCase();
+        const phone = (u.phone || "");
+        const searchText = memberSearch.toLowerCase();
+        
+        const matchesSearch = name.includes(searchText) || phone.includes(searchText);
+        const matchesSub = memberFilterSub === "all" || (u.subscription && u.subscription.toUpperCase().includes(memberFilterSub.toUpperCase()));
+        const matchesDate = !memberFilterDate || (u.created_at && u.created_at.startsWith(memberFilterDate));
+        
+        return matchesSearch && matchesSub && matchesDate;
+      });
       setMembers(filtered);
     }
-  }, [memberSearch]);
+  }, [memberSearch, memberFilterSub, memberFilterDate]);
+
+  useEffect(() => {
+    loadMembers();
+  }, [loadMembers]);
 
   // Books Search
   const searchBooks = useCallback(async () => {
@@ -209,7 +370,8 @@ export default function App() {
         let status = "issued", label = "Issued", fine = 0;
         if (today > due) {
           status = "overdue"; label = "Overdue";
-          fine = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+          const daysOverdue = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+          fine = daysOverdue * fineAmount;
         }
         return { ...d, book: b, user, status, label, fine };
       }));
@@ -258,9 +420,16 @@ export default function App() {
     const visitors = logsData?.filter(l => l.in_time && l.in_time.startsWith(today)).length || 0;
     
     let overdue = 0;
+    let totalFineSum = 0;
     const usage: Record<string, number> = {};
     issuedData?.forEach(d => {
-      if (new Date() > new Date(d.due_date)) overdue++;
+      const today = new Date();
+      const due = new Date(d.due_date);
+      if (today > due) {
+        overdue++;
+        const days = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+        totalFineSum += days * fineAmount;
+      }
       usage[d.user_phone] = (usage[d.user_phone] || 0) + 1;
     });
 
@@ -302,6 +471,7 @@ export default function App() {
       users: usersData?.length || 0,
       issued: issuedData?.length || 0,
       overdue,
+      totalFineSum,
       visitors,
       topUsers: topUsersList,
       categoryData,
@@ -355,11 +525,42 @@ export default function App() {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
-    const user = Object.fromEntries(formData.entries());
+    const rawData = Object.fromEntries(formData.entries());
+    
+    // Process subscription into a single string for the 'subscription' column
+    const type = rawData.sub_type as string;
+    const count = rawData.sub_duration || "1";
+    const subStr = type === 'lifetime' ? 'LIFETIME' : `${type.toUpperCase()} (${count} ${type === 'monthly' ? 'Months' : 'Years'})`;
+    
+    // Calculate estimated joining fee (for librarian's knowledge, though just storing the status here)
+    let total = subsJoiningFee;
+    if (type === 'monthly') total += subsMonthlyFee * Number(count);
+    else if (type === 'yearly') total += subsYearlyFee * Number(count);
+    else total += subsLifetimeFee;
+
+    const user = {
+      name: rawData.name,
+      phone: rawData.phone,
+      address: rawData.address,
+      pincode: rawData.pincode,
+      email: rawData.email,
+      gender: rawData.gender,
+      dob: rawData.dob,
+      member_id: rawData.member_id,
+      occupation: rawData.occupation,
+      notes: rawData.notes,
+      subscription: subStr
+    };
+
     const { error } = await supabase.from("users").insert([user]);
     if (error) alert(error.message);
     else {
-      alert("Member registered");
+      Swal.fire({
+        icon: 'success',
+        title: 'Member Registered',
+        html: `<p class="text-xs">Initial payment due: <b class="text-accent text-lg">₹${total}</b></p><p class="text-[9px] mt-2 text-slate-400">Stored subscription: ${subStr}</p>`,
+        confirmButtonColor: '#3b82f6'
+      });
       form.reset();
       setGenMemberId("");
       loadMembers();
@@ -495,11 +696,31 @@ export default function App() {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
+    const rawData = Object.fromEntries(formData.entries());
+
+    // Process subscription into a single string for the 'subscription' column
+    const type = rawData.edit_sub_type as string;
+    const count = rawData.edit_sub_duration || "1";
+    const subStr = type === 'lifetime' ? 'LIFETIME' : `${type.toUpperCase()} (${count} ${type === 'monthly' ? 'Months' : 'Years'})`;
+
+    const data = {
+      name: rawData.name,
+      phone: rawData.phone,
+      address: rawData.address,
+      pincode: rawData.pincode,
+      email: rawData.email,
+      gender: rawData.gender,
+      dob: rawData.dob,
+      member_id: rawData.member_id,
+      occupation: rawData.occupation,
+      notes: rawData.notes,
+      subscription: subStr
+    };
+
     const { error } = await supabase.from("users").update(data).eq("id", editMemberModal.id);
     if (error) alert(error.message);
     else {
-      alert("Updated");
+      Swal.fire({ icon: 'success', title: 'Profile Updated', text: `Subscription set to: ${subStr}`, timer: 1500 });
       setEditMemberModal(null);
       loadMembers();
     }
@@ -1076,6 +1297,7 @@ export default function App() {
           <ul className="list-none space-y-1 mb-6">
             {[
               { id: "engagement", label: "Member Hub", icon: "🔔" },
+              { id: "rules", label: "Rules & Policy", icon: "🛡️" },
               { id: "advanced", label: "Advanced Ops", icon: "⚙️" },
               { id: "reports", label: "Analytics", icon: "📈" },
               { id: "attendance", label: "Gate Logs", icon: "🕒" }
@@ -1180,10 +1402,18 @@ export default function App() {
 
         {/* MEMBERS */}
         {activeTab === "members" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-            <div className="lg:col-span-1 section-card p-6">
-              <h3 className="text-sm font-bold border-b border-surface-border pb-4 mb-4">ADD NEW MEMBER</h3>
-              <form onSubmit={addUser} className="space-y-3">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start">
+            {/* LEFT SECTION: FORM */}
+            <div className="lg:col-span-2 section-card p-8 border-t-4 border-t-primary shadow-xl">
+              <div className="flex items-center gap-3 mb-6 border-b border-slate-100 pb-4">
+                <div className="w-10 h-10 bg-primary/10 text-primary rounded-xl flex items-center justify-center text-lg">📝</div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Add New Member</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Profile Creation Terminal</p>
+                </div>
+              </div>
+              
+              <form onSubmit={addUser} className="space-y-4">
                 <input name="name" placeholder="Full Name" required className="input-field" />
                 <input name="phone" placeholder="Phone" required className="input-field" />
                 <input name="address" placeholder="Address" required className="input-field" />
@@ -1213,33 +1443,117 @@ export default function App() {
                   </button>
                 </div>
                 <input name="occupation" placeholder="Occupation" className="input-field" />
+                
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-primary">Subscription Plan (Joining: +₹{subsJoiningFee})</p>
+                  <select name="sub_type" className="input-field text-xs uppercase" required defaultValue="monthly">
+                    <option value="monthly">MONTHLY (₹{subsMonthlyFee})</option>
+                    <option value="yearly">YEARLY (₹{subsYearlyFee})</option>
+                    <option value="lifetime">LIFETIME (₹{subsLifetimeFee})</option>
+                  </select>
+                  <input name="sub_duration" type="number" placeholder="Count (Months/Years)" defaultValue={1} className="input-field py-2 text-xs" />
+                  <p className="text-[9px] text-slate-400 italic">Duration ignored for Lifetime memberships.</p>
+                </div>
+
                 <textarea name="notes" placeholder="Notes (Optional)" className="input-field h-24" />
                 <button type="submit" className="btn-primary w-full mt-2">Create Profile</button>
               </form>
             </div>
-            <div className="lg:col-span-2 section-card">
-              <div className="section-header">
-                <h2>Master Members Registry</h2>
-                <input 
-                  placeholder="Scan users..." 
-                  value={memberSearch}
-                  onChange={(e) => setMemberSearch(e.target.value)}
-                  className="px-3 py-1 border border-surface-border rounded-lg text-xs outline-none w-48"
-                />
+            {/* RIGHT SECTION: REGISTRY LIST */}
+            <div className="lg:col-span-3 section-card shadow-xl border border-surface-border">
+              <div className="section-header bg-slate-50/50 p-6 border-b border-surface-border">
+                <div className="flex flex-col gap-1">
+                  <h2 className="text-lg font-black text-slate-800 tracking-tight leading-none">Master Members Registry</h2>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Digital Asset Access Ledger</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setShowMemberFilters(!showMemberFilters)}
+                    className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${showMemberFilters ? 'bg-primary text-white border-primary' : 'bg-white text-slate-500 border-surface-border'}`}
+                    title="Toggle Advanced Filters"
+                  >
+                    <span>🎯 FILTERS</span>
+                  </button>
+                  <div className="flex gap-1">
+                    <input 
+                      placeholder="Search name/phone..." 
+                      value={memberSearch}
+                      onChange={(e) => setMemberSearch(e.target.value)}
+                      className="px-3 py-1.5 border border-surface-border rounded-lg text-xs outline-none w-48"
+                    />
+                    <button 
+                      onClick={() => loadMembers()} 
+                      className="bg-primary text-white px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-md shadow-primary/20"
+                    >
+                      SEARCH 🔍
+                    </button>
+                  </div>
+                </div>
               </div>
+
+              {showMemberFilters && (
+                <div className="px-6 py-4 bg-slate-50 border-b border-surface-border flex flex-wrap gap-4 animate-in slide-in-from-top-2 duration-200">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Subscription Type</label>
+                    <select 
+                      value={memberFilterSub} 
+                      onChange={(e) => setMemberFilterSub(e.target.value)}
+                      className="px-3 py-1.5 border border-surface-border rounded-lg text-xs outline-none bg-white min-w-[120px]"
+                    >
+                      <option value="all">ALL PLANS</option>
+                      <option value="MONTHLY">MONTHLY</option>
+                      <option value="YEARLY">YEARLY</option>
+                      <option value="LIFETIME">LIFETIME</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Joining Date</label>
+                    <input 
+                      type="date" 
+                      value={memberFilterDate} 
+                      onChange={(e) => setMemberFilterDate(e.target.value)}
+                      className="px-3 py-1.5 border border-surface-border rounded-lg text-xs outline-none bg-white"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <button 
+                      onClick={() => {
+                        setMemberSearch("");
+                        setMemberFilterSub("all");
+                        setMemberFilterDate("");
+                      }}
+                      className="px-4 py-1.5 bg-slate-200 text-slate-600 text-[10px] font-black rounded-lg uppercase tracking-widest hover:bg-slate-300 transition-all"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <table className="w-full">
                 <thead>
                   <tr>
                     <th className="table-header">Full Name</th>
-                    <th className="table-header">Contact</th>
+                    <th className="table-header">Subscription</th>
                     <th className="table-header text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {members.map(u => (
                     <tr key={u.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="table-cell font-semibold">{u.name}</td>
-                      <td className="table-cell text-text-muted">{u.phone}</td>
+                      <td className="table-cell">
+                        <div className="font-semibold">{u.name}</div>
+                        <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{u.phone}</div>
+                      </td>
+                      <td className="table-cell">
+                        <span className={`text-[9px] px-2 py-0.5 rounded-full font-black tracking-[0.1em] ${
+                          u.subscription?.includes('LIFETIME') ? 'bg-amber-100 text-amber-700' :
+                          u.subscription?.includes('YEARLY') ? 'bg-emerald-100 text-emerald-700' :
+                          'bg-blue-100 text-primary'
+                        }`}>
+                          {u.subscription || "PENDING"}
+                        </span>
+                      </td>
                       <td className="table-cell text-right space-x-2">
                         <button onClick={() => setEditMemberModal(u)} className="text-accent font-bold text-xs hover:underline">EDIT</button>
                         <button onClick={() => deleteMember(u.id)} className="text-error font-bold text-xs hover:underline">DEL</button>
@@ -1516,13 +1830,13 @@ export default function App() {
                     <p className="text-xs text-blue-700 font-bold italic mt-1">by {scannedBook.author}</p>
                   </div>
                   
-                  <input name="stocknumber" placeholder="Library Stock #" required className="input-field shadow-md border-accent/20 border-2" />
-                  <input name="callnumber" placeholder="Call #" required className="input-field shadow-sm" />
-                  <input name="isbn" placeholder="ISBN (Optional)" defaultValue={scannedBook.isbn} className="input-field shadow-sm bg-slate-50 font-mono text-xs" />
-                  <input name="title" defaultValue={scannedBook.title} className="input-field shadow-sm md:col-span-1 col-span-full font-bold text-slate-800" />
-                  <input name="author" defaultValue={scannedBook.author} className="input-field shadow-sm" />
-                  <input name="publisher" defaultValue={scannedBook.publisher} className="input-field shadow-sm" />
-                  <input name="category" defaultValue={scannedBook.category} className="input-field shadow-sm col-span-full" />
+                  <input name="stocknumber" placeholder="Library Stock #" required onFocus={handleInputFocus} className="input-field shadow-md border-accent/20 border-2" />
+                  <input name="callnumber" placeholder="Call #" required onFocus={handleInputFocus} className="input-field shadow-sm" />
+                  <input name="isbn" placeholder="ISBN (Optional)" defaultValue={scannedBook.isbn} onFocus={handleInputFocus} className="input-field shadow-sm bg-slate-50 font-mono text-xs" />
+                  <input name="title" defaultValue={scannedBook.title} onFocus={handleInputFocus} className="input-field shadow-sm md:col-span-1 col-span-full font-bold text-slate-800" />
+                  <input name="author" defaultValue={scannedBook.author} onFocus={handleInputFocus} className="input-field shadow-sm" />
+                  <input name="publisher" defaultValue={scannedBook.publisher} onFocus={handleInputFocus} className="input-field shadow-sm" />
+                  <input name="category" defaultValue={scannedBook.category} onFocus={handleInputFocus} className="input-field shadow-sm col-span-full" />
                   
                   <select name="language" defaultValue={scannedBook.language} className="input-field shadow-sm">
                     <option value="">Select Language</option>
@@ -1551,7 +1865,25 @@ export default function App() {
             {addMode === 'manual' && (
               <div className="section-card animate-in fade-in duration-500">
                 <div className="section-header flex justify-between items-center">
-                  <h2>Register New Library Asset</h2>
+                  <div>
+                    <h2>Register New Library Asset</h2>
+                    <div className="mt-2 flex items-center gap-4">
+                      <button 
+                        onClick={() => {
+                          setIsManglishEnabled(!isManglishEnabled);
+                          if (isManglishEnabled) setShowVirtualKeyboard(false);
+                        }}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-full border-2 transition-all group ${
+                          isManglishEnabled 
+                          ? 'border-accent bg-accent/5 text-accent font-black' 
+                          : 'border-slate-200 text-slate-400 font-bold hover:border-slate-300'
+                        }`}
+                      >
+                        <div className={`w-3 h-3 rounded-full ${isManglishEnabled ? 'bg-accent animate-pulse' : 'bg-slate-200'}`}></div>
+                        <span className="text-[10px] uppercase tracking-widest">Malayalam KB {isManglishEnabled ? 'ON' : 'OFF'}</span>
+                      </button>
+                    </div>
+                  </div>
                   <div className="flex gap-2">
                     <label className="btn-primary bg-slate-800 text-[10px] px-3 py-1.5 cursor-pointer flex items-center gap-1">
                       <span>📥 BULK CSV</span>
@@ -1560,13 +1892,13 @@ export default function App() {
                   </div>
                 </div>
                 <form onSubmit={addBook} className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input name="stocknumber" placeholder="Stock Number" required className="input-field shadow-sm" />
-                  <input name="isbn" placeholder="ISBN Number (Optional)" className="input-field shadow-sm font-mono text-xs" />
-                  <input name="callnumber" placeholder="Call Number" required className="input-field shadow-sm" />
-                  <input name="title" placeholder="Full Title" required className="input-field shadow-sm col-span-full" />
-                  <input name="author" placeholder="Author Name" required className="input-field shadow-sm" />
-                  <input name="publisher" placeholder="Publisher" className="input-field shadow-sm" />
-                  <input name="category" placeholder="Category" className="input-field shadow-sm col-span-full" />
+                  <input name="stocknumber" placeholder="Stock Number" required onFocus={handleInputFocus} className="input-field shadow-sm" />
+                  <input name="isbn" placeholder="ISBN Number (Optional)" onFocus={handleInputFocus} className="input-field shadow-sm font-mono text-xs" />
+                  <input name="callnumber" placeholder="Call Number" required onFocus={handleInputFocus} className="input-field shadow-sm" />
+                  <input name="title" placeholder="Full Title" required onFocus={handleInputFocus} className="input-field shadow-sm col-span-full" />
+                  <input name="author" placeholder="Author Name" required onFocus={handleInputFocus} className="input-field shadow-sm" />
+                  <input name="publisher" placeholder="Publisher" onFocus={handleInputFocus} className="input-field shadow-sm" />
+                  <input name="category" placeholder="Category" onFocus={handleInputFocus} className="input-field shadow-sm col-span-full" />
                   <select name="language" className="input-field shadow-sm">
                     <option value="">Select Language</option>
                     <option value="MALAYALAM">MALAYALAM</option>
@@ -1582,11 +1914,210 @@ export default function App() {
                       <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
                     ))}
                   </select>
-                  <input name="price" placeholder="Price" className="input-field shadow-sm col-span-full" />
+                  <input name="price" placeholder="Price" onFocus={handleInputFocus} className="input-field shadow-sm col-span-full" />
                   <button type="submit" className="btn-primary py-4 col-span-full uppercase tracking-widest text-[11px] font-black shadow-lg shadow-primary/20">Initialize Asset Registry</button>
                 </form>
               </div>
             )}
+          </div>
+        )}
+
+        {/* VIRTUAL MANGLISH KEYBOARD */}
+        {isManglishEnabled && showVirtualKeyboard && (activeTab === 'addBook' || editBookModal) && (
+          <div className="fixed bottom-0 left-0 right-0 z-[60] bg-white border-t-2 border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] p-4 animate-in slide-in-from-bottom-full duration-500 overflow-y-auto max-h-[40vh]">
+            <div className="max-w-4xl mx-auto">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-accent/10 text-accent px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">
+                    Manglish Input Board
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400 italic">Target: {focusedInput?.placeholder || focusedInput?.name || 'None'}</span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-[9px] font-black uppercase text-slate-300 tracking-widest bg-slate-100 px-2 py-1 rounded">
+                    Tip: Type in English & hit "Enter" to convert
+                  </div>
+                  <button 
+                    onClick={() => setShowVirtualKeyboard(false)}
+                    className="text-slate-400 hover:text-slate-800 transition-colors text-xl"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-6">
+                {/* Section Switching Tabs */}
+                <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-1 overflow-x-auto no-scrollbar">
+                  <button 
+                    onClick={() => setActiveKbTab('vowels')}
+                    className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeKbTab === 'vowels' ? 'bg-white text-accent shadow-sm' : 'text-slate-500 hover:bg-white/50'}`}
+                  >
+                    അ / ാ (Vowels)
+                  </button>
+                  <button 
+                    onClick={() => setActiveKbTab('consonants')}
+                    className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeKbTab === 'consonants' ? 'bg-white text-accent shadow-sm' : 'text-slate-500 hover:bg-white/50'}`}
+                  >
+                    ക / ഖ (Consonants)
+                  </button>
+                  <button 
+                    onClick={() => setActiveKbTab('conjuncts')}
+                    className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeKbTab === 'conjuncts' ? 'bg-white text-accent shadow-sm' : 'text-slate-500 hover:bg-white/50'}`}
+                  >
+                    ക്ക / ന്ത (Conjuncts)
+                  </button>
+                  <button 
+                    onClick={() => setActiveKbTab('extras')}
+                    className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeKbTab === 'extras' ? 'bg-white text-accent shadow-sm' : 'text-slate-500 hover:bg-white/50'}`}
+                  >
+                    ൻ / ൧ (Extras)
+                  </button>
+                </div>
+
+                <div className="min-h-[220px]">
+                  {activeKbTab === 'vowels' && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                      <div>
+                        <div className="text-[9px] font-black uppercase text-slate-400 mb-2 tracking-widest">Swaraaksharangal (Vowels)</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {manglishMap.vowels.map(v => (
+                            <button 
+                              key={`${v.e}-${v.m}`} 
+                              onClick={() => handleKeyClick(v.m)}
+                              className="min-w-[44px] h-11 bg-slate-50 border border-slate-200 rounded-lg hover:bg-white hover:border-accent hover:text-accent transition-all flex flex-col items-center justify-center shadow-sm active:scale-95"
+                            >
+                              <span className="text-[10px] font-black text-slate-400">{v.e}</span>
+                              <span className="text-lg font-bold mt-[-4px]">{v.m}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] font-black uppercase text-slate-400 mb-2 tracking-widest">Maathras (Vowel Signs / Equipment)</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {manglishMap.signs.map(s => (
+                            <button 
+                              key={`${s.e}-${s.m}`} 
+                              onClick={() => handleKeyClick(s.m)}
+                              className="min-w-[44px] h-11 bg-orange-50/50 border border-orange-100 rounded-lg hover:bg-white hover:border-accent hover:text-accent transition-all flex flex-col items-center justify-center shadow-sm active:scale-95"
+                            >
+                              <span className="text-[10px] font-black text-orange-400/70">{s.e}</span>
+                              <span className="text-lg font-bold mt-[-4px]">{s.m}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeKbTab === 'consonants' && (
+                    <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                      <div className="text-[9px] font-black uppercase text-slate-400 mb-2 tracking-widest">Vyanjanaaksharangal (Consonants)</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {manglishMap.consonants.map(c => (
+                          <button 
+                            key={`${c.e}-${c.m}`} 
+                            onClick={() => handleKeyClick(c.m)}
+                            className="min-w-[44px] h-11 bg-slate-50 border border-slate-200 rounded-lg hover:bg-white hover:border-accent hover:text-accent transition-all flex flex-col items-center justify-center shadow-sm active:scale-95"
+                          >
+                            <span className="text-[10px] font-black text-slate-400">{c.e}</span>
+                            <span className="text-lg font-bold mt-[-4px]">{c.m}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {activeKbTab === 'conjuncts' && (
+                    <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                      <div className="text-[9px] font-black uppercase text-slate-400 mb-2 tracking-widest">Common Koottaksharam (Conjuncts)</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {manglishMap.conjuncts.map(c => (
+                          <button 
+                            key={`${c.e}-${c.m}`} 
+                            onClick={() => handleKeyClick(c.m)}
+                            className="min-w-[50px] h-11 bg-blue-50 border border-blue-100 rounded-lg hover:bg-white hover:border-accent hover:text-accent transition-all flex flex-col items-center justify-center shadow-sm active:scale-95"
+                          >
+                            <span className="text-[10px] font-black text-blue-400/70">{c.e}</span>
+                            <span className="text-lg font-bold mt-[-4px]">{c.m}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {activeKbTab === 'extras' && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                      <div>
+                        <div className="text-[9px] font-black uppercase text-slate-400 mb-2 tracking-widest">Chillu Letters & Technical Joiners</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {manglishMap.chillu.map(c => (
+                            <button 
+                              key={`${c.e}-${c.m}`} 
+                              onClick={() => handleKeyClick(c.m)}
+                              className="min-w-[44px] h-11 bg-teal-50/50 border border-teal-100 rounded-lg hover:bg-white hover:border-accent hover:text-accent transition-all flex flex-col items-center justify-center shadow-sm active:scale-95"
+                            >
+                              <span className="text-[10px] font-black text-teal-400/70">{c.e}</span>
+                              <span className="text-lg font-bold mt-[-4px]">{c.m}</span>
+                            </button>
+                          ))}
+                          {manglishMap.symbols.filter(s => ['ZWJ', 'ZWNJ'].includes(s.e)).map(s => (
+                            <button 
+                              key={`${s.e}-${s.m}`} 
+                              onClick={() => handleKeyClick(s.m)}
+                              className="min-w-[70px] h-11 bg-purple-50 border border-purple-100 rounded-lg hover:bg-white hover:border-accent hover:text-accent transition-all flex flex-col items-center justify-center shadow-sm active:scale-95"
+                            >
+                              <span className="text-[10px] font-black text-purple-400/70 uppercase">{s.e}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] font-black uppercase text-slate-400 mb-2 tracking-widest">Archaic Symbols & Numerals</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {manglishMap.symbols.filter(s => !['ZWJ', 'ZWNJ'].includes(s.e)).map(s => (
+                            <button 
+                              key={`${s.e}-${s.m}`} 
+                              onClick={() => handleKeyClick(s.m)}
+                              className="min-w-[44px] h-11 bg-orange-50/50 border border-orange-100 rounded-lg hover:bg-white hover:border-accent hover:text-accent transition-all flex flex-col items-center justify-center shadow-sm active:scale-95"
+                            >
+                              <span className="text-[10px] font-black text-orange-400/70">{s.e}</span>
+                              <span className="text-lg font-bold mt-[-4px]">{s.m}</span>
+                            </button>
+                          ))}
+                          {manglishMap.digits.map(d => (
+                            <button 
+                              key={`${d.e}-${d.m}`} 
+                              onClick={() => handleKeyClick(d.m)}
+                              className="min-w-[44px] h-11 bg-slate-50 border border-slate-200 rounded-lg hover:bg-white hover:border-accent hover:text-accent transition-all flex flex-col items-center justify-center shadow-sm active:scale-95"
+                            >
+                              <span className="text-[10px] font-black text-slate-400">{d.e}</span>
+                              <span className="text-lg font-bold mt-[-4px]">{d.m}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2 pt-4 border-t border-slate-100 mt-2">
+                  <button 
+                    onClick={handleBackspace}
+                    className="flex-1 h-12 bg-red-50 border border-red-100 text-red-600 rounded-xl hover:bg-red-600 hover:text-white font-black transition-all flex items-center justify-center text-xs shadow-sm active:scale-95 uppercase tracking-widest"
+                  >
+                    Delete / Backspace
+                  </button>
+                  <button 
+                    onClick={() => handleKeyClick(" ")}
+                    className="flex-[2] h-12 bg-slate-100 border border-slate-200 text-slate-600 rounded-xl hover:bg-white hover:border-accent hover:text-accent font-black transition-all flex items-center justify-center text-xs shadow-sm active:scale-95 uppercase tracking-widest"
+                  >
+                    Space Bar
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1605,20 +2136,6 @@ export default function App() {
                 >
                   DISPATCH OVERDUE ALERTS
                 </button>
-              </div>
-              <div className="section-card p-6">
-                <h3 className="text-lg font-black tracking-tight text-primary">Global Borrowing Policy</h3>
-                <p className="text-xs text-text-muted mt-1 mb-4">Define maximum concurrent asset allocation per individual subscriber profile.</p>
-                <div className="flex items-center gap-3">
-                  <select 
-                    value={borrowingLimit} 
-                    onChange={(e) => setBorrowingLimit(Number(e.target.value))}
-                    className="input-field w-32 font-black"
-                  >
-                    {[1, 2, 3, 4, 5, 10, 20].map(v => <option key={v} value={v}>{v} ASSETS</option>)}
-                  </select>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Syncing with registry...</span>
-                </div>
               </div>
             </div>
 
@@ -1658,6 +2175,124 @@ export default function App() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* RULES & POLICY */}
+        {activeTab === "rules" && (
+          <div className="flex flex-col gap-8">
+            <div className="section-header">
+              <h1 className="text-2xl font-black tracking-tight uppercase">System Rules & Protocol</h1>
+              <p className="text-slate-400 text-xs font-bold tracking-widest">Global Governance Configuration</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="section-card p-8">
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center text-primary text-xl">🛡️</div>
+                  <div>
+                    <h3 className="text-lg font-black tracking-tight text-primary uppercase">Borrowing Policy</h3>
+                    <p className="text-[10px] text-slate-400 font-bold tracking-widest">Concurrent Allocation Limit</p>
+                  </div>
+                </div>
+                <p className="text-xs text-text-muted mb-6 leading-relaxed">Define the absolute ceiling for concurrent asset possession per individual digital profile. This constraint is enforced during the checkout protocol.</p>
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Max Asset Count</span>
+                    <select 
+                      value={borrowingLimit} 
+                      onChange={(e) => setBorrowingLimit(Number(e.target.value))}
+                      className="input-field w-40 font-black text-center"
+                    >
+                      {[1, 2, 3, 4, 5, 10, 15, 20, 50].map(v => <option key={v} value={v}>{v} ASSETS</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2 text-[9px] font-bold text-accent uppercase tracking-tighter italic">
+                    <span className="w-2 h-2 bg-accent rounded-full animate-pulse"></span>
+                    Policy currently active system-wide
+                  </div>
+                </div>
+              </div>
+
+              <div className="section-card p-8">
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500 text-xl">⚖️</div>
+                  <div>
+                    <h3 className="text-lg font-black tracking-tight text-primary uppercase">Financial Penalties</h3>
+                    <p className="text-[10px] text-slate-400 font-bold tracking-widest">Late Return Compensation</p>
+                  </div>
+                </div>
+                <p className="text-xs text-text-muted mb-6 leading-relaxed">Set the fixed daily charge triggered automatically when an asset circulation period exceeds the 30-day (1 month) allocation window.</p>
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between p-4 bg-amber-50/50 rounded-xl border border-amber-100">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-amber-600">Daily Fine Amount</span>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">₹</span>
+                      <input 
+                        type="number" 
+                        value={fineAmount}
+                        onChange={(e) => setFineAmount(Math.max(0, Number(e.target.value)))}
+                        className="input-field w-40 pl-8 font-black text-center"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                  <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                    <p className="text-[10px] text-blue-600 font-bold leading-tight">
+                      <span className="block uppercase mb-1">Impact Analysis:</span>
+                      This charge is calculated per asset, per day of delay. It is reflected in the Live Ledger and user profile analytics.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="section-card p-8 md:col-span-2">
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center text-emerald-500 text-xl">🎟️</div>
+                  <div>
+                    <h3 className="text-lg font-black tracking-tight text-primary uppercase">Subscription Pricing</h3>
+                    <p className="text-[10px] text-slate-400 font-bold tracking-widest">Membership Fee Structure</p>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                  {[
+                    { label: "Joining Fee (First Time)", state: subsJoiningFee, setter: setSubsJoiningFee },
+                    { label: "One Month Fee", state: subsMonthlyFee, setter: setSubsMonthlyFee },
+                    { label: "Annual Fee", state: subsYearlyFee, setter: setSubsYearlyFee },
+                    { label: "Lifetime Fee", state: subsLifetimeFee, setter: setSubsLifetimeFee }
+                  ].map((fee, i) => (
+                    <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">{fee.label}</p>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">₹</span>
+                        <input 
+                          type="number" 
+                          value={fee.state}
+                          onChange={(e) => fee.setter(Math.max(0, Number(e.target.value)))}
+                          className="input-field pl-8 font-black text-lg py-2"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="section-card p-8 bg-slate-900 border-none relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-accent/10 rounded-full blur-3xl -mr-32 -mt-32 group-hover:bg-accent/20 transition-all duration-700"></div>
+              <div className="relative z-10 flex flex-col md:flex-row items-center gap-8">
+                <div className="flex-1">
+                  <h3 className="text-xl font-black text-white uppercase tracking-tight mb-2">Protocol Enforcement Status</h3>
+                  <p className="text-slate-400 text-xs leading-relaxed max-w-xl">All system circulations are monitored against these global constants. Fines are calculated in real-time based on your configured parameters. Changes to these policies take effect immediately for all existing and future issues.</p>
+                </div>
+                <div className="bg-white/5 backdrop-blur-md p-6 rounded-3xl border border-white/10 flex flex-col items-center min-w-[200px]">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1">System Health</span>
+                  <div className="text-2xl font-black text-white">100% SECURE</div>
+                  <div className="text-[9px] font-bold text-accent mt-2 animate-pulse uppercase tracking-widest">Monitoring Fines Realtime</div>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1963,11 +2598,12 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
               {[
                 { label: "Assets Indexed", value: reportSummary.books, color: "text-slate-900" },
                 { label: "Active Loans", value: reportSummary.issued, color: "text-accent" },
                 { label: "Overdue Breaches", value: reportSummary.overdue, color: "text-error" },
+                { label: "Fine Revenue (Est)", value: `₹${reportSummary.totalFineSum || 0}`, color: "text-amber-600" },
                 { label: "Gate Traffic", value: reportSummary.visitors, color: "text-emerald-600" }
               ].map((s, i) => (
                 <div key={i} className="section-card p-6 border-l-4 border-l-primary hover:translate-y-[-4px] transition-all">
@@ -2017,12 +2653,12 @@ export default function App() {
             </div>
             <form onSubmit={updateBook} className="p-8 space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <input name="callnumber" defaultValue={editBookModal.callnumber} placeholder="Call Number" className="input-field" />
-                <input name="isbn" defaultValue={editBookModal.isbn} placeholder="ISBN" className="input-field font-mono text-xs" />
+                <input name="callnumber" defaultValue={editBookModal.callnumber} placeholder="Call Number" onFocus={handleInputFocus} className="input-field" />
+                <input name="isbn" defaultValue={editBookModal.isbn} placeholder="ISBN" onFocus={handleInputFocus} className="input-field font-mono text-xs" />
               </div>
-              <input name="title" defaultValue={editBookModal.title} placeholder="Full Title" className="input-field" />
-              <input name="author" defaultValue={editBookModal.author} placeholder="Author" className="input-field" />
-              <input name="publisher" defaultValue={editBookModal.publisher} placeholder="Publisher" className="input-field" />
+              <input name="title" defaultValue={editBookModal.title} placeholder="Full Title" onFocus={handleInputFocus} className="input-field" />
+              <input name="author" defaultValue={editBookModal.author} placeholder="Author" onFocus={handleInputFocus} className="input-field" />
+              <input name="publisher" defaultValue={editBookModal.publisher} placeholder="Publisher" onFocus={handleInputFocus} className="input-field" />
               <select name="language" defaultValue={editBookModal.language} className="input-field">
                 <option value="">Select Language</option>
                 <option value="MALAYALAM">MALAYALAM</option>
@@ -2032,14 +2668,14 @@ export default function App() {
                 <option value="SANSKRIT">SANSKRIT</option>
                 <option value="OTHER">OTHER</option>
               </select>
-              <input name="category" defaultValue={editBookModal.category} placeholder="Category" className="input-field" />
+              <input name="category" defaultValue={editBookModal.category} placeholder="Category" onFocus={handleInputFocus} className="input-field" />
               <select name="shelfnumber" defaultValue={editBookModal.shelfnumber} className="input-field">
                 <option value="">Select Shelf (1-30)</option>
                 {Array.from({ length: 30 }, (_, i) => (
                   <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
                 ))}
               </select>
-              <input name="price" defaultValue={editBookModal.price} placeholder="Price" className="input-field" />
+              <input name="price" defaultValue={editBookModal.price} placeholder="Price" onFocus={handleInputFocus} className="input-field" />
               <div className="flex gap-3 pt-4">
                 <button type="submit" className="flex-1 btn-primary py-3">Commit Changes</button>
                 <button type="button" onClick={() => setEditBookModal(null)} className="flex-1 bg-slate-100 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-200 uppercase tracking-widest transition-all">Abort</button>
@@ -2071,6 +2707,26 @@ export default function App() {
               <input name="dob" defaultValue={editMemberModal.dob} type="date" className="input-field" />
               <input name="member_id" defaultValue={editMemberModal.member_id} placeholder="Membership ID" className="input-field" />
               <input name="occupation" defaultValue={editMemberModal.occupation} placeholder="Occupation" className="input-field" />
+              
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
+                <p className="text-[9px] font-black uppercase tracking-widest text-primary">Update Subscription</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <select name="edit_sub_type" className="input-field text-xs uppercase" defaultValue={editMemberModal.subscription?.toLowerCase().includes('year') ? 'yearly' : editMemberModal.subscription?.toLowerCase().includes('lifetime') ? 'lifetime' : 'monthly'}>
+                    <option value="monthly">MONTHLY</option>
+                    <option value="yearly">YEARLY</option>
+                    <option value="lifetime">LIFETIME</option>
+                  </select>
+                  <input 
+                    name="edit_sub_duration" 
+                    type="number" 
+                    placeholder="Duration" 
+                    defaultValue={editMemberModal.subscription?.match(/\d+/)?.[0] || 1} 
+                    className="input-field py-2 text-xs" 
+                  />
+                </div>
+                <p className="text-[9px] text-slate-400 italic">Changing this will overwrite the current subscription data.</p>
+              </div>
+
               <textarea name="notes" defaultValue={editMemberModal.notes} placeholder="Notes (Optional)" className="input-field h-24" />
               <div className="flex gap-3 pt-4">
                 <button type="submit" className="flex-1 btn-primary py-3">Validate Profile</button>
