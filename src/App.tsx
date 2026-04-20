@@ -51,6 +51,7 @@ export default function App() {
   const [cameras, setCameras] = useState<any[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>("");
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [lookupStep, setLookupStep] = useState<string>("");
   const addFormRef = useRef<HTMLFormElement>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
@@ -510,6 +511,7 @@ export default function App() {
 
     setLookupLoading(true);
     setScannedBook(null);
+    setLookupStep("Searching Google Records...");
     try {
       // 1. Try Google Books API
       let res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${targetIsbn.trim()}`);
@@ -520,6 +522,7 @@ export default function App() {
         info = data.items[0].volumeInfo;
       } else {
         // 2. Fallback to Open Library if Google Books fails
+        setLookupStep("Consulting Open Library Archive...");
         res = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${targetIsbn.trim()}&format=json&jscmd=data`);
         data = await res.json();
         const bookKey = `ISBN:${targetIsbn.trim()}`;
@@ -535,8 +538,54 @@ export default function App() {
         }
       }
 
+      // 3. Ultimate Fallback: Gemini AI with Live Web Search (Excellent for Malayalam/Indian Books)
       if (!info) {
-        throw new Error("No book found for this ISBN in Google or Open Library database.");
+        setLookupStep("Launching AI Web Search (Malayalam Specialist)...");
+        try {
+          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+          const prompt = `Identify the metadata for book ISBN: ${targetIsbn.trim()}. 
+            This library contains many Malayalam books. Use search to find the correct title, authors, publisher, and category. 
+            Return the details in JSON format.`;
+            
+          const genRes = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  authors: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  publisher: { type: Type.STRING },
+                  categories: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  language: { type: Type.STRING }
+                },
+                required: ["title", "authors"]
+              },
+              tools: [{ googleSearch: {} }]
+            }
+          });
+
+          if (genRes.text) {
+            const aiData = JSON.parse(genRes.text);
+            if (aiData.title) {
+              info = {
+                title: aiData.title,
+                authors: aiData.authors,
+                publisher: aiData.publisher || "Unknown",
+                categories: aiData.categories || [],
+                language: aiData.language || "Malayalam"
+              };
+            }
+          }
+        } catch (aiErr) {
+          console.error("AI Fallback Error:", aiErr);
+        }
+      }
+
+      if (!info) {
+        throw new Error("No book found for this ISBN in any global database.");
       }
 
       const authors = info.authors ? info.authors.join(", ") : "Unknown";
@@ -556,6 +605,7 @@ export default function App() {
 
       setScannedBook(newBookData);
       setShowCamera(false); 
+      setLookupStep("");
       Swal.fire({
         icon: 'success',
         title: 'Book Identified!',
@@ -564,6 +614,7 @@ export default function App() {
         showConfirmButton: false
       });
     } catch (err: any) {
+      setLookupStep("");
       Swal.fire("Lookup Failed", err.message || "Could not retrieve book details.", "error");
     } finally {
       setLookupLoading(false);
@@ -1774,6 +1825,32 @@ export default function App() {
       </main>
 
       {/* MODALS */}
+      {lookupLoading && (
+        <div className="fixed inset-0 bg-primary/20 backdrop-blur-md flex items-center justify-center z-[100] animate-in fade-in duration-300">
+          <div className="bg-white p-10 rounded-3xl shadow-2xl flex flex-col items-center max-w-sm text-center border-2 border-accent/20">
+            <div className="relative mb-6">
+              <div className="w-20 h-20 border-4 border-slate-100 border-t-accent rounded-full animate-spin"></div>
+              <div className="absolute inset-0 flex items-center justify-center text-2xl">🔎</div>
+            </div>
+            <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Connecting to Registry</h3>
+            <p className="text-[10px] font-black text-accent uppercase tracking-[0.2em] mt-1 mb-4 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-accent rounded-full animate-pulse"></span>
+              {lookupStep || "Retrieving Core Data"}
+            </p>
+            <div className="flex gap-1 w-full justify-center">
+              {[0, 1, 2, 3].map(i => (
+                <div key={i} className={`h-1 flex-1 rounded-full bg-accent/10 overflow-hidden`}>
+                   <div className={`h-full bg-accent animate-shimmer`} style={{ animationDelay: `${i * 0.2}s` }}></div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-6 text-[10px] text-slate-400 font-medium leading-relaxed italic">
+              Our AI is searching global and local databases for accurate book metadata...
+            </p>
+          </div>
+        </div>
+      )}
+
       {editBookModal && (
         <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-surface-border">

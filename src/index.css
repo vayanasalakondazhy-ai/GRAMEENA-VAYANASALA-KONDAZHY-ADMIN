@@ -12,6 +12,12 @@
   --color-surface-border: #e2e8f0;
   --color-text-main: #0f172a;
   --color-text-muted: #64748b;
+
+  @keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  --animate-shimmer: shimmer 2s infinite linear;
 }
 
 @layer base {
