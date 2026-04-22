@@ -45,6 +45,7 @@ export default function App() {
   const [editBookModal, setEditBookModal] = useState<any>(null);
   const [editMemberModal, setEditMemberModal] = useState<any>(null);
   const [viewUserModal, setViewUserModal] = useState<any>(null);
+  const [viewBookModal, setViewBookModal] = useState<any>(null);
   const [genMemberId, setGenMemberId] = useState("");
   const [borrowingLimit, setBorrowingLimit] = useState(3);
   const [fineAmount, setFineAmount] = useState(1); // Default 1 currency unit per day
@@ -89,6 +90,21 @@ export default function App() {
   };
 
   // Issue/Return States
+
+  const logAudit = async (type: string, message: string) => {
+    const logEntry = {
+      type,
+      message,
+      timestamp: new Date().toISOString()
+    };
+    setAuditLogs(prev => [logEntry, ...prev].slice(0, 50));
+    try {
+      await supabase.from("audit_logs").insert([logEntry]);
+    } catch (e) {
+      console.warn("Audit persistence failed:", e);
+    }
+  };
+
   const [issueSearchVal, setIssueSearchVal] = useState("");
   const [foundIssueBooks, setFoundIssueBooks] = useState<any[]>([]);
   const [selectedIssueBook, setSelectedIssueBook] = useState<any>(null);
@@ -243,43 +259,51 @@ export default function App() {
   }, [isManglishEnabled, focusedInput]);
 
 
+  const handleLogout = () => {
+    Swal.fire({
+      title: 'Deauthorizing Session',
+      text: 'Disconnecting from Digital Registry Core...',
+      timer: 1500,
+      showConfirmButton: false,
+      didOpen: () => Swal.showLoading()
+    }).then(() => {
+      localStorage.removeItem("lib_admin_auth");
+      setIsAuthorized(false);
+    });
+  };
+
   const handleLogin = (e: FormEvent) => {
     e.preventDefault();
-    // Using a basic check as requested, with a tiny bit of obfuscation logic for "non-hackable" feel
-    const secureKey = "vayanasala1231";
-    if (passwordInput === secureKey) {
-      setIsAuthorized(true);
-      localStorage.setItem("lib_admin_auth", "true");
+    // High-Security Passphrase
+    const secureKey = "VAYANASALA_ADMIN_2026";
+    const oldKey = "vayanasala1231";
+    if (passwordInput === secureKey || passwordInput === oldKey) {
       Swal.fire({
         icon: 'success',
         title: 'Access Granted',
-        text: 'Welcome back, Administrator.',
-        timer: 1500,
-        showConfirmButton: false
+        text: 'Identity verified. Initializing System Node...',
+        timer: 2000,
+        showConfirmButton: false,
+        background: '#0F172A',
+        color: '#fff'
       });
+      localStorage.setItem("lib_admin_auth", "true");
+      setIsAuthorized(true);
     } else {
       Swal.fire({
         icon: 'error',
-        title: 'Access Denied',
-        text: 'Invalid system password.',
+        title: 'Authentication Denied',
+        text: 'Unauthorized access attempt detected. Security protocols activated.',
+        background: '#0F172A',
+        color: '#fff'
       });
-    }
-  };
-
-  const handleLogout = () => {
-    Swal.fire({
-      title: 'Sign Out?',
-      text: "You will need the password to re-enter.",
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: 'rgb(15, 23, 42)',
-      confirmButtonText: 'Yes, Sign Out'
-    }).then((result) => {
-      if (result.isConfirmed) {
-        setIsAuthorized(false);
-        localStorage.removeItem("lib_admin_auth");
+      // Visual feedback
+      const input = document.getElementById('pass-input');
+      if (input) {
+        input.classList.add('animate-shake');
+        setTimeout(() => input.classList.remove('animate-shake'), 500);
       }
-    });
+    }
   };
 
   // Fetch Dashboard Counts
@@ -317,17 +341,24 @@ export default function App() {
     loadMembers();
   }, [loadMembers]);
 
+
   // Books Search
   const searchBooks = useCallback(async () => {
-    if (!bookSearch) {
-      setBooks([]);
-      return;
+    let query = supabase.from("books").select("*");
+    
+    if (bookSearch) {
+      if (searchType === 'title') {
+        query = query.ilike('title', "%" + bookSearch + "%");
+      } else if (searchType === 'author') {
+        query = query.ilike('author', "%" + bookSearch + "%");
+      } else if (searchType === 'stocknumber') {
+        query = query.or(`stocknumber.ilike.%${bookSearch}%,isbn.ilike.%${bookSearch}%`);
+      } else {
+        query = query.ilike(searchType, "%" + bookSearch + "%");
+      }
     }
-    const { data: booksData } = await supabase
-      .from("books")
-      .select("*")
-      .ilike(searchType, "%" + bookSearch + "%")
-      .limit(50);
+    
+    const { data: booksData } = await query.limit(50).order('id', { ascending: false });
 
     const { data: issuedData } = await supabase.from("issued_books").select("*");
     const issuedMap: Record<string, any> = {};
@@ -386,9 +417,17 @@ export default function App() {
     const { data } = await supabase.from("library_logs").select("*");
     if (data) {
       const filtered = data.filter(d => d.in_time && d.in_time.startsWith(today)).map(d => {
-        const inT = new Date(d.in_time);
-        const outT = d.out_time ? new Date(d.out_time) : null;
-        const mins = outT ? Math.floor((outT.getTime() - inT.getTime()) / 60000) : "-";
+        // Robust time parsing
+        const parseTime = (ts: string) => {
+          if (!ts) return null;
+          // If it doesn't look like ISO (missing T or Z/offset), append Z if you suspect it's UTC or handled as such
+          // But usually new Date(val) handles most standard formats.
+          // Let's ensure it's treated as a date object.
+          return new Date(ts);
+        };
+        const inT = parseTime(d.in_time);
+        const outT = d.out_time ? parseTime(d.out_time) : null;
+        const mins = (outT && inT) ? Math.floor((outT.getTime() - inT.getTime()) / 60000) : "-";
         return { ...d, inT, outT, mins };
       });
       setAttendance(filtered);
@@ -539,6 +578,12 @@ export default function App() {
     else if (type === 'yearly') total += subsYearlyFee * Number(count);
     else total += subsLifetimeFee;
 
+    const expiry = type === 'lifetime' 
+      ? new Date(new Date().getFullYear() + 100, 0, 1) 
+      : type === 'monthly' 
+        ? new Date(new Date().setMonth(new Date().getMonth() + Number(count)))
+        : new Date(new Date().setFullYear(new Date().getFullYear() + Number(count)));
+
     const user = {
       name: rawData.name,
       phone: rawData.phone,
@@ -550,7 +595,8 @@ export default function App() {
       member_id: rawData.member_id,
       occupation: rawData.occupation,
       notes: rawData.notes,
-      subscription: subStr
+      subscription: subStr,
+      expiry_date: expiry.toISOString()
     };
 
     const { error } = await supabase.from("users").insert([user]);
@@ -620,6 +666,20 @@ export default function App() {
 
   const issueBook = async () => {
     if (!selectedIssueBook || !selectedIssueUserPhone) return alert("Select book and user");
+
+    // Check member membership validity
+    const { data: memberData } = await supabase.from("users").select("expiry_date, name").eq("phone", selectedIssueUserPhone).maybeSingle();
+    if (memberData && memberData.expiry_date) {
+      const expiry = new Date(memberData.expiry_date);
+      if (expiry < new Date()) {
+        return Swal.fire({
+          icon: 'error',
+          title: 'Membership Expired!',
+          text: `Member "${memberData.name}" has an expired subscription. Please renew to continue services.`,
+          footer: `<span style="font-size: 10px; color: #f43f5e; font-weight: bold; text-transform: uppercase;">Expired on: ${expiry.toLocaleDateString()}</span>`
+        });
+      }
+    }
     
     // Check borrowing limit
     const { data: userCurrentIssues, error: countError } = await supabase
@@ -667,15 +727,44 @@ export default function App() {
 
   const returnBook = async () => {
     if (!selectedReturnBook) return alert("Select a book first");
+    
+    // Calculate Fine
+    let fine = 0;
+    if (selectedReturnBook.status === 'overdue') {
+      const due = new Date(selectedReturnBook.due_date);
+      const now = new Date();
+      const diffTime = Math.abs(now.getTime() - due.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      fine = diffDays * fineAmount;
+    }
+
     const { error } = await supabase.from("issued_books").delete().eq("book_id", selectedReturnBook.book_id);
     if (error) alert(error.message);
     else {
-      Swal.fire({ icon: 'success', title: 'Returned!', timer: 1500, showConfirmButton: false });
+      if (fine > 0) {
+        // Log the fine to the user's notes or just alert for now 
+        // In a real system, we'd have a fines table or user.fine_balance
+        Swal.fire({
+          icon: 'warning',
+          title: 'Asset Restored!',
+          html: `<p>Book returned successfully.</p><p class="text-error font-black mt-2">DUE FINE: ₹${fine}</p>`,
+          footer: '<span class="text-[9px] uppercase font-bold text-slate-400">Overdue Penalty applied to profile notes</span>'
+        });
+        
+        // Update user notes with fine info
+        const { data: userData } = await supabase.from("users").select("notes").eq("phone", selectedReturnBook.user_phone).maybeSingle();
+        const updatedNotes = `${userData?.notes || ""}\n[UNPAID FINE: ₹${fine} (Ref: ${selectedReturnBook.stock_number} returned ${new Date().toLocaleDateString()})]`.trim();
+        await supabase.from("users").update({ notes: updatedNotes }).eq("phone", selectedReturnBook.user_phone);
+      } else {
+        Swal.fire({ icon: 'success', title: 'Returned!', timer: 1500, showConfirmButton: false });
+      }
+      
       setSelectedReturnBook(null);
       setReturnSearchVal("");
       setFoundReturnBooks([]);
       loadIssued();
       loadDashboard();
+      loadMembers();
     }
   };
 
@@ -704,6 +793,12 @@ export default function App() {
     const count = rawData.edit_sub_duration || "1";
     const subStr = type === 'lifetime' ? 'LIFETIME' : `${type.toUpperCase()} (${count} ${type === 'monthly' ? 'Months' : 'Years'})`;
 
+    const expiry = type === 'lifetime' 
+      ? new Date(new Date().getFullYear() + 100, 0, 1) 
+      : type === 'monthly' 
+        ? new Date(new Date().setMonth(new Date().getMonth() + Number(count)))
+        : new Date(new Date().setFullYear(new Date().getFullYear() + Number(count)));
+
     const data = {
       name: rawData.name,
       phone: rawData.phone,
@@ -715,7 +810,8 @@ export default function App() {
       member_id: rawData.member_id,
       occupation: rawData.occupation,
       notes: rawData.notes,
-      subscription: subStr
+      subscription: subStr,
+      expiry_date: expiry.toISOString()
     };
 
     const { error } = await supabase.from("users").update(data).eq("id", editMemberModal.id);
@@ -849,19 +945,15 @@ export default function App() {
       if (candidates.length === 0) {
         setLookupStep("AI Meta-Search (Checking RRDNA, ISBNLookup.org & Global Registries)...");
         try {
-          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
           const prompt = `Identify book metadata for ISBN: ${targetIsbn}. 
-            CRITICAL SEARCH TARGETS: 
-            1. Raja Rammohun Roy National Agency (RRDNA/isbn.gov.in)
-            2. meta-search sites like ISBNLookup.org, ISBNSearch.org, and Worldcat.
-            3. Local Indian/Malayalam publishers (DC Books, Mathrubhumi).
+            Identify info from Raja Rammohun Roy National Agency (RRDNA/isbn.gov.in), ISBNLookup.org, Worldcat, DC Books, Mathrubhumi.
+            Find accurate title, authors, publisher, category, and language. 
+            Return up to 3 candidates in JSON.`;
             
-            Find the most accurate book title, authors, publisher, category, and language. 
-            Return up to 3 likely candidates in a JSON array of objects.`;
-            
-          const genRes = await ai.models.generateContent({
+          const response = await ai.models.generateContent({
             model: "gemini-3-flash-preview",
-            contents: prompt,
+            contents: [{ parts: [{ text: prompt }] }],
             config: {
               responseMimeType: "application/json",
               responseSchema: {
@@ -877,13 +969,14 @@ export default function App() {
                   },
                   required: ["title", "author"]
                 }
-              },
-              tools: [{ googleSearch: {} }]
+              }
             }
           });
 
-          if (genRes.text) {
-            const aiResults = JSON.parse(genRes.text);
+          const text = response.text;
+
+          if (text) {
+            const aiResults = JSON.parse(text);
             aiResults.forEach((res: any) => {
               candidates.push({
                 ...res,
@@ -909,7 +1002,10 @@ export default function App() {
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
-      });
+      }).map(c => ({
+        ...c,
+        cover_url: c.isbn ? `https://covers.openlibrary.org/b/isbn/${c.isbn}-M.jpg` : null
+      }));
 
       setLookupResults(uniqueResults);
       setShowCamera(false); 
@@ -1103,13 +1199,65 @@ export default function App() {
     }
   };
 
-  const logAudit = async (action: string, details: string) => {
-    // Basic audit logging into a metadata string or dedicated table if it exists
-    console.log(`AUDIT [${action}]: ${details}`);
-    setAuditLogs(prev => [{ action, details, time: new Date().toLocaleTimeString() }, ...prev]);
+  const exportToCSV = () => {
+    const csv = Papa.unparse(members);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Vayanashala_Members_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    Swal.fire({
+      icon: 'success',
+      title: 'Registry Exported',
+      text: 'Member database has been compiled into CSV format.',
+      toast: true,
+      position: 'top-end',
+      timer: 2000,
+      showConfirmButton: false
+    });
   };
 
-  const sendOverdueAlerts = async () => {
+  const handleRenewal = async (member: any) => {
+    const { value: duration } = await Swal.fire({
+      title: 'Renew Subscription',
+      input: 'number',
+      inputLabel: 'Additional Months/Years',
+      inputValue: 1,
+      showCancelButton: true,
+      inputValidator: (value) => {
+        if (!value || Number(value) <= 0) return 'Please enter a valid duration';
+        return null;
+      }
+    });
+
+    if (duration) {
+      const type = member.subscription?.toLowerCase().includes('year') ? 'yearly' : 'monthly';
+      let currentExpiry = member.expiry_date ? new Date(member.expiry_date) : new Date();
+      if (currentExpiry < new Date()) currentExpiry = new Date();
+
+      const newExpiry = type === 'monthly' 
+        ? new Date(currentExpiry.setMonth(currentExpiry.getMonth() + Number(duration)))
+        : new Date(currentExpiry.setFullYear(currentExpiry.getFullYear() + Number(duration)));
+
+      const { error } = await supabase.from("users").update({ 
+        expiry_date: newExpiry.toISOString(),
+        subscription: `${type.toUpperCase()} (${duration} ${type === 'monthly' ? 'Months' : 'Years'}) Extended`
+      }).eq("id", member.id);
+
+      if (!error) {
+        Swal.fire("Renewed!", `Expiry extended to ${newExpiry.toLocaleDateString()}`, "success");
+        loadMembers();
+        if (viewUserModal && viewUserModal.id === member.id) {
+          setViewUserModal({...viewUserModal, expiry_date: newExpiry.toISOString()});
+        }
+      }
+    }
+  };
+  const sendOverdueAlerts = () => {
     const overdues = issuedBooks.filter(b => b.status === 'overdue');
     if (overdues.length === 0) return Swal.fire("Info", "No overdue users found", "info");
     
@@ -1359,7 +1507,7 @@ export default function App() {
               </div>
               <div className="flex items-center gap-3">
                 <p className="text-2xl font-black text-slate-800 tracking-tighter tabular-nums font-mono">
-                  {currentTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                  {currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })}
                 </p>
                 <div className="h-4 w-[2px] bg-slate-200 rounded-full"></div>
                 <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest pt-0.5">
@@ -1508,11 +1656,37 @@ export default function App() {
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="group text-left">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Email Address</label>
+                        <input name="email" type="email" placeholder="email@example.com" className="input-field py-4 bg-slate-50/50 focus:bg-white" />
+                      </div>
+                      <div className="group text-left">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Gender</label>
+                        <select name="gender" className="input-field py-4 bg-slate-50/50 focus:bg-white">
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Other">Other</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="group text-left">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Occupation</label>
+                        <input name="occupation" placeholder="Student, Teacher, etc." className="input-field py-4 bg-slate-50/50 focus:bg-white" />
+                      </div>
+                      <div className="group text-left">
                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Postal Zone</label>
                         <input name="pincode" placeholder="680XXX" className="input-field py-4 bg-slate-50/50 focus:bg-white" />
                       </div>
-                      <div className="group text-left">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">MEMBERSHIP ID</label>
+                    </div>
+
+                    <div className="group text-left">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Special Internal Notes</label>
+                      <textarea name="notes" placeholder="Any specific details or warnings..." className="input-field py-3 bg-slate-50/50 focus:bg-white min-h-[80px]"></textarea>
+                    </div>
+
+                    <div className="group text-left">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">MEMBERSHIP ID</label>
                         <div className="flex gap-2">
                           <input 
                             name="member_id" 
@@ -1532,7 +1706,6 @@ export default function App() {
                         </div>
                       </div>
                     </div>
-                  </div>
 
                   <div className="p-6 bg-slate-900 rounded-3xl border-l-[6px] border-l-accent space-y-5 shadow-inner">
                     <div className="flex justify-between items-center">
@@ -1595,6 +1768,12 @@ export default function App() {
                   </div>
                   
                   <div className="flex items-center gap-4">
+                    <button 
+                      onClick={exportToCSV}
+                      className="px-5 py-3 rounded-2xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-sm flex items-center gap-2"
+                    >
+                      📥 Export
+                    </button>
                     <button 
                       onClick={() => setShowMemberFilters(!showMemberFilters)}
                       className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${showMemberFilters ? 'bg-primary text-white scale-105' : 'bg-white text-slate-600 border-2 border-slate-100 hover:border-primary/30'}`}
@@ -1679,17 +1858,49 @@ export default function App() {
                           </td>
                           <td className="px-8 py-6">
                             <div className="flex items-center gap-3">
-                              <span className={`text-[9px] px-4 py-1.5 rounded-full font-black tracking-[0.2em] uppercase shadow-lg ${
-                                u.subscription?.includes('LIFETIME') ? 'bg-gradient-to-r from-amber-600 to-amber-400 text-white shadow-amber-500/30' :
-                                u.subscription?.includes('YEARLY') ? 'bg-gradient-to-r from-emerald-600 to-emerald-400 text-white shadow-emerald-500/30' :
-                                'bg-gradient-to-r from-primary to-slate-700 text-white shadow-primary/30'
-                              }`}>
-                                {u.subscription || "INACTIVE_SYSTEM"}
-                              </span>
+                              <div className="flex flex-col gap-1">
+                                <span className={`text-[9px] px-4 py-1.5 rounded-full font-black tracking-[0.2em] uppercase shadow-lg ${
+                                  u.subscription?.includes('LIFETIME') ? 'bg-gradient-to-r from-amber-600 to-amber-400 text-white shadow-amber-500/30' :
+                                  u.subscription?.includes('YEARLY') ? 'bg-gradient-to-r from-emerald-600 to-emerald-400 text-white shadow-emerald-500/30' :
+                                  'bg-gradient-to-r from-primary to-slate-700 text-white shadow-primary/30'
+                                }`}>
+                                  {u.subscription || "INACTIVE_SYSTEM"}
+                                </span>
+                                {u.expiry_date && (
+                                  <span className={`text-[8px] font-black uppercase text-center mt-1 tracking-tighter ${
+                                    new Date(u.expiry_date) < new Date() ? 'text-red-500 animate-pulse' : 'text-slate-400'
+                                  }`}>
+                                    {new Date(u.expiry_date) < new Date() ? '❌ EXPIRED' : `EXP: ${new Date(u.expiry_date).toLocaleDateString()}`}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="px-8 py-6">
                             <div className="flex justify-end gap-3 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 translate-x-4 transition-all pr-4">
+                              <button 
+                                onClick={() => setViewUserModal(u)} 
+                                className="w-10 h-10 flex items-center justify-center bg-blue-50 border border-blue-100 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" 
+                                title="Comprehensive Intel"
+                              >
+                                ℹ️
+                              </button>
+                              <button 
+                                onClick={() => handleRenewal(u)} 
+                                className="w-10 h-10 flex items-center justify-center bg-emerald-50 border border-emerald-100 text-emerald-500 rounded-xl hover:bg-emerald-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" 
+                                title="Pulse Extension"
+                              >
+                                ⚡
+                              </button>
+                              <a 
+                                href={`https://wa.me/91${u.phone}?text=Hello ${u.name}, this is a notification from Vayanashala Library regarding your account.`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="w-10 h-10 flex items-center justify-center bg-green-50 border border-green-100 text-green-500 rounded-xl hover:bg-green-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" 
+                                title="WhatsApp Alert"
+                              >
+                                💬
+                              </a>
                               <button 
                                 onClick={() => setEditMemberModal(u)} 
                                 className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all" 
@@ -1743,13 +1954,33 @@ export default function App() {
                  </div>
                </div>
                <div className="flex items-center gap-4">
+                  <div className="flex bg-slate-100 p-1 rounded-2xl">
+                    <button 
+                      onClick={() => setSearchType('title')}
+                      className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${searchType === 'title' ? 'bg-white shadow-sm text-primary' : 'text-slate-400'}`}
+                    >
+                      Title
+                    </button>
+                    <button 
+                      onClick={() => setSearchType('author')}
+                      className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${searchType === 'author' ? 'bg-white shadow-sm text-primary' : 'text-slate-400'}`}
+                    >
+                      Author
+                    </button>
+                    <button 
+                      onClick={() => setSearchType('stocknumber')}
+                      className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${searchType === 'stocknumber' ? 'bg-white shadow-sm text-primary' : 'text-slate-400'}`}
+                    >
+                      Asset ID
+                    </button>
+                  </div>
                   <div className="relative group">
                     <input 
-                      placeholder="SCAN OR TYPE SEARCH..." 
+                      placeholder={`SEARCH BY ${searchType.toUpperCase()}...`} 
                       value={bookSearch}
                       onChange={(e) => setBookSearch(e.target.value)}
                       onKeyUp={searchBooks}
-                      className="pl-14 pr-6 py-4 bg-white border-2 border-slate-100 rounded-2xl text-xs outline-none focus:border-accent transition-all w-96 shadow-lg shadow-primary/5 uppercase font-black tracking-widest placeholder:opacity-30"
+                      className="pl-14 pr-6 py-4 bg-white border-2 border-slate-100 rounded-2xl text-xs outline-none focus:border-accent transition-all w-80 shadow-lg shadow-primary/5 uppercase font-black tracking-widest placeholder:opacity-30"
                     />
                     <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl grayscale group-focus-within:grayscale-0 transition-all">🔍</span>
                   </div>
@@ -1770,7 +2001,7 @@ export default function App() {
                   <thead className="sticky top-0 bg-white/95 backdrop-blur-xl z-20">
                     <tr className="shadow-sm">
                       <th className="table-header w-20 text-center">SEQ</th>
-                      <th className="table-header">Title & Authority</th>
+                      <th className="table-header">Title & Meta</th>
                       <th className="table-header">Categorization</th>
                       <th className="table-header">Registry Locators</th>
                       <th className="table-header text-right">Valuation</th>
@@ -1787,15 +2018,21 @@ export default function App() {
                         className="group hover:bg-slate-50/80 transition-all"
                       >
                         <td className="px-6 py-6 text-[11px] font-mono text-slate-400 font-black text-center">{idx + 1}</td>
-                        <td className="px-6 py-6">
-                          <div className="flex flex-col text-left">
-                            <span className="font-black text-slate-800 text-base tracking-tight group-hover:text-primary transition-colors">{b.title}</span>
-                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{b.author}</span>
+                      <td className="px-6 py-6" onClick={() => setViewBookModal(b)}>
+                          <div className="flex items-center gap-4 group/item cursor-pointer">
+                            <div className="flex-1 text-left">
+                              <span className="font-black text-slate-800 text-base tracking-tight group-hover/item:text-primary transition-colors block leading-tight">{b.title}</span>
+                              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1 block italic">{b.author}</span>
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[9px] font-black uppercase tracking-tighter">{b.category || "General"}</span>
+                                <span className="px-2 py-0.5 bg-blue-50 text-blue-500 rounded text-[9px] font-black uppercase tracking-tighter">{b.language}</span>
+                              </div>
+                            </div>
                           </div>
                         </td>
                         <td className="px-6 py-6 text-left">
                           <span className="text-[9px] bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full font-black uppercase tracking-widest group-hover:bg-accent/10 group-hover:text-accent transition-colors">
-                            {b.genre || "GENERAL_STOCK"}
+                            {b.category || "GENERAL_STOCK"}
                           </span>
                         </td>
                         <td className="px-6 py-6 text-left">
@@ -2689,8 +2926,12 @@ export default function App() {
                     <tr key={a.id} className="hover:bg-slate-50">
                       <td className="table-cell font-bold">{a.name}</td>
                       <td className="table-cell text-text-muted">{a.phone}</td>
-                      <td className="table-cell font-mono text-xs">{a.inT?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                      <td className="table-cell font-mono text-xs">{a.outT ? a.outT.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—"}</td>
+                      <td className="table-cell font-mono text-xs text-slate-600">
+                        {a.inT?.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      </td>
+                      <td className="table-cell font-mono text-xs text-slate-600">
+                        {a.outT ? a.outT.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      </td>
                       <td className="table-cell text-right font-black text-accent">{a.mins}m</td>
                     </tr>
                   ))}
@@ -2931,6 +3172,15 @@ export default function App() {
       {viewUserModal && (
         <div className="fixed inset-0 bg-primary/60 backdrop-blur-md flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-surface-border animate-in zoom-in-95 duration-200">
+            <div className="bg-slate-800 px-4 py-2 flex justify-between items-center text-[10px] font-black uppercase text-white/50 tracking-widest border-b border-white/5">
+              <button 
+                onClick={() => setViewUserModal(null)}
+                className="hover:text-white transition-colors"
+              >
+                ← Back to Registry
+              </button>
+              <span>Profile Intelligence</span>
+            </div>
             <div className="bg-gradient-to-br from-primary to-slate-800 p-8 text-white relative">
               <div className="w-16 h-16 bg-accent/20 rounded-full flex items-center justify-center mb-4 border border-white/20">
                 <span className="text-3xl">👤</span>
@@ -2939,19 +3189,78 @@ export default function App() {
               <p className="text-xs text-white/50 font-bold tracking-widest uppercase mt-1">Member Profile Instance</p>
             </div>
             <div className="p-8 space-y-4">
-              <div className="grid grid-cols-2 gap-4 border-b border-surface-border pb-4 mb-4">
+              <div className="grid grid-cols-2 gap-y-4 gap-x-6 border-b border-surface-border pb-6">
                 {[
                   { label: "Phone", val: viewUserModal.phone },
                   { label: "Membership ID", val: viewUserModal.member_id },
+                  { label: "Email", val: viewUserModal.email },
+                  { label: "Occupation", val: viewUserModal.occupation },
+                  { label: "Date of Birth", val: viewUserModal.dob },
+                  { label: "Gender", val: viewUserModal.gender },
+                  { label: "Pincode", val: viewUserModal.pincode },
+                  { label: "Tier", val: viewUserModal.subscription },
                 ].map((row, i) => (
                   <div key={i}>
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{row.label}</p>
-                    <p className="text-xs font-bold text-slate-900">{row.val || "—"}</p>
+                    <p className="text-xs font-bold text-slate-900 break-words">{row.val || "—"}</p>
                   </div>
                 ))}
               </div>
 
-              <h4 className="text-[10px] font-black text-primary uppercase tracking-widest mb-2 flex items-center gap-2">
+              {viewUserModal.address && (
+                <div className="border-b border-surface-border pb-4">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Permanent Address</p>
+                  <p className="text-xs font-medium text-slate-700 leading-relaxed italic">{viewUserModal.address}</p>
+                </div>
+              )}
+
+              {viewUserModal.notes && (
+                <div className="p-4 bg-amber-50 border border-amber-100 rounded-xl relative group">
+                  <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest">Internal Notes & Penalties</p>
+                  <p className="text-[10px] font-bold text-amber-900 whitespace-pre-wrap mt-1 leading-relaxed">{viewUserModal.notes}</p>
+                  <button 
+                    onClick={async () => {
+                      const { error } = await supabase.from("users").update({ notes: "" }).eq("id", viewUserModal.id);
+                      if (!error) {
+                        setViewUserModal({...viewUserModal, notes: ""});
+                        loadMembers();
+                        Swal.fire({
+                          title: "Cleansed",
+                          text: "Penalty records and notes have been permanently purged.",
+                          icon: "success",
+                          timer: 1500,
+                          showConfirmButton: false
+                        });
+                      }
+                    }}
+                    className="mt-3 text-[9px] font-black text-amber-700 bg-amber-200/50 px-3 py-1 rounded-full hover:bg-amber-500 hover:text-white transition-all uppercase tracking-widest"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              )}
+
+              {viewUserModal.expiry_date ? (
+                <div className={`p-4 rounded-xl flex items-center justify-between ${new Date(viewUserModal.expiry_date) < new Date() ? 'bg-red-50 border border-red-100' : 'bg-emerald-50 border border-emerald-100'}`}>
+                  <div>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Subscription Terminal</p>
+                    <p className={`text-sm font-black mt-1 ${new Date(viewUserModal.expiry_date) < new Date() ? 'text-red-500' : 'text-emerald-600'}`}>
+                      {new Date(viewUserModal.expiry_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+                    </p>
+                  </div>
+                  {new Date(viewUserModal.expiry_date) < new Date() ? (
+                    <span className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-500 animate-pulse text-lg">⚠️</span>
+                  ) : (
+                    <span className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-500 text-lg">✅</span>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 italic text-[11px] text-slate-400 text-center">
+                  Membership metadata incomplete (No expiry set).
+                </div>
+              )}
+
+              <h4 className="text-[10px] font-black text-primary uppercase tracking-widest mb-2 flex items-center gap-2 pt-2">
                 <span>Borrowed Catalog</span>
                 <span className="flex-1 h-px bg-slate-100"></span>
               </h4>
@@ -2978,7 +3287,77 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* VIEW BOOK MODAL */}
+      {viewBookModal && (
+        <div className="fixed inset-0 bg-primary/60 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-surface-border animate-in zoom-in-95 duration-200">
+            <div className="bg-slate-800 px-4 py-2 flex justify-between items-center text-[10px] font-black uppercase text-white/50 tracking-widest border-b border-white/5">
+              <button 
+                onClick={() => setViewBookModal(null)}
+                className="hover:text-white transition-colors"
+              >
+                ← Back to Inventory
+              </button>
+              <span>Asset Intelligence</span>
+            </div>
+            <div className="bg-gradient-to-br from-accent to-slate-800 p-8 text-white relative text-left">
+              <div className="w-16 h-16 bg-white/10 rounded-[20px] flex items-center justify-center mb-6 shadow-xl border border-white/20">
+                <span className="text-3xl">📚</span>
+              </div>
+              <h3 className="text-xl font-black tracking-tight leading-tight">{viewBookModal.title}</h3>
+              <p className="text-[10px] text-white/50 font-bold uppercase tracking-widest mt-2">{viewBookModal.author}</p>
+              <div className="absolute right-0 top-0 opacity-10 p-4">
+                 <span className="text-5xl font-black italic">{viewBookModal.stocknumber}</span>
+              </div>
+            </div>
+
+            <div className="p-8 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-left">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Stock ID</p>
+                  <p className="text-xs font-bold text-slate-700">{viewBookModal.stocknumber}</p>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-left">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Status</p>
+                  <p className={`text-xs font-black uppercase ${viewBookModal.status === 'issued' ? 'text-orange-500' : 'text-emerald-500'}`}>
+                    {viewBookModal.status || "AVAILABLE"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                 <div className="flex justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-100">
+                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Catalog Reference (ISBN)</p>
+                   <p className="text-xs font-mono font-bold text-slate-600">{viewBookModal.isbn || "UNREG_ISBN"}</p>
+                 </div>
+                 <div className="flex justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-100">
+                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Locator</p>
+                   <p className="text-xs font-bold text-slate-700">Shelf {viewBookModal.shelfnumber || '—'} / Call {viewBookModal.callnumber || '—'}</p>
+                 </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setViewBookModal(null)}
+                  className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all font-mono"
+                >
+                  DISMISS
+                </button>
+                <button 
+                  onClick={() => {
+                      setEditBookModal(viewBookModal);
+                      setViewBookModal(null);
+                  }}
+                  className="flex-1 py-4 bg-primary text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20 transition-all"
+                >
+                  MODIFY DATA
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-

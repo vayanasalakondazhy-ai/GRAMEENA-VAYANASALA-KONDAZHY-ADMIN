@@ -57,7 +57,7 @@
   }
 
   .section-card {
-    @apply bg-white rounded-3xl border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden transition-all duration-300 hover:shadow-[0_20px_50px_rgb(0,0,0,0.08)] hover:-translate-y-1;
+    @apply bg-white rounded-3xl border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-300 hover:shadow-[0_20px_50px_rgb(0,0,0,0.08)] hover:-translate-y-1;
   }
   
   .table-header {

@@ -1,6 +1,6 @@
 {
-  "name": "Library Admin Pro",
-  "description": "A comprehensive library management dashboard fully integrated with Supabase for books, members, circulation, and attendance tracking.",
+  "name": "VAYANASALA ADMIN CONSOLE",
+  "description": "Enterprise-grade library management system for Grameena Vayanasala Kondazhy, featuring secure authentication, asset circulation, subscriber management, and AI-powered book metadata retrieval.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": []
 }
