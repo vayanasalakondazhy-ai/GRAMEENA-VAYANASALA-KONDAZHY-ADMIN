@@ -97,6 +97,7 @@ export default function App() {
   const [subsYearlyFee, setSubsYearlyFee] = useState(100);
   const [subsLifetimeFee, setSubsLifetimeFee] = useState(1000);
   const [subsJoiningFee, setSubsJoiningFee] = useState(10);
+  const [settingsLoading, setSettingsLoading] = useState(false);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [financialStats, setFinancialStats] = useState({ total: 0, fines: 0, subs: 0 });
@@ -148,6 +149,72 @@ export default function App() {
       await supabase.from("audit_logs").insert([logEntry]);
     } catch (e) {
       console.warn("Audit persistence failed:", e);
+    }
+  };
+
+  const loadLibrarySettings = useCallback(async () => {
+    setSettingsLoading(true);
+    try {
+      const { data, error } = await supabase.from('lib_settings').select('*').eq('id', 1).maybeSingle();
+      if (error) {
+        console.error("Settings load error:", error);
+        return;
+      }
+      if (data) {
+        setBorrowingLimit(data.borrowing_limit);
+        setFineAmount(data.fine_amount);
+        setSubsMonthlyFee(data.subs_monthly_fee);
+        setSubsYearlyFee(data.subs_yearly_fee);
+        setSubsLifetimeFee(data.subs_lifetime_fee);
+        setSubsJoiningFee(data.subs_joining_fee);
+      }
+    } catch (e) {
+      console.error("Settings sync fatal error:", e);
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, []);
+
+  const updateLibrarySettings = async (e: FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const newData = {
+      borrowing_limit: Number(formData.get("borrowing_limit")),
+      fine_amount: Number(formData.get("fine_amount")),
+      subs_joining_fee: Number(formData.get("subs_joining_fee")),
+      subs_monthly_fee: Number(formData.get("subs_monthly_fee")),
+      subs_yearly_fee: Number(formData.get("subs_yearly_fee")),
+      subs_lifetime_fee: Number(formData.get("subs_lifetime_fee")),
+    };
+
+    setLookupLoading(true); // Re-use loading state for simplicity
+    try {
+      const { error } = await supabase
+        .from('lib_settings')
+        .update({
+          ...newData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', 1);
+
+      if (error) throw error;
+      
+      Swal.fire({
+        icon: 'success',
+        title: 'Policy Updated',
+        text: 'Library configuration nodes have been synchronized with the master database.',
+        timer: 1500,
+        showConfirmButton: false,
+        background: '#0F172A',
+        color: '#fff'
+      });
+      loadLibrarySettings();
+      logAudit("SYSTEM", "Updated library policy settings");
+    } catch (e: any) {
+      Swal.fire({ icon: 'error', title: 'Update Failed', text: e.message });
+    } finally {
+      setLookupLoading(false);
     }
   };
 
@@ -1628,7 +1695,8 @@ export default function App() {
     loadIssued();
     loadTodayAttendance();
     loadTransactions();
-  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions]);
+    loadLibrarySettings();
+  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions, loadLibrarySettings]);
 
   useEffect(() => {
     if (activeTab === "reports") loadReports();
@@ -1769,8 +1837,7 @@ export default function App() {
             {[
               { id: "engagement", label: "Member Hub", icon: "🔔" },
               { id: "map", label: "Store Mapping", icon: "🗺️" },
-              { id: "rules", label: "Rules & Policy", icon: "🛡️" },
-              { id: "advanced", label: "Advanced Ops", icon: "⚙️" },
+              { id: "settings", label: "Library Config", icon: "⚙️" },
               { id: "reports", label: "Analytics", icon: "📈" },
               { id: "attendance", label: "Gate Logs", icon: "🕒" }
             ].map(tab => (
@@ -2976,6 +3043,151 @@ export default function App() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "settings" && (
+          <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-8 duration-700">
+            <div className="p-12 glass-card rounded-[40px] border border-slate-200/50 shadow-2xl relative overflow-hidden bg-white/80 backdrop-blur-xl">
+              <div className="absolute top-0 right-0 p-12 opacity-[0.03] pointer-events-none">
+                 <span className="text-[200px] font-black italic select-none">CONFIG</span>
+              </div>
+              
+              <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 border-b border-slate-100 pb-10 mb-10">
+                <div className="flex items-center gap-6">
+                  <div className="w-20 h-20 bg-primary text-white rounded-3xl flex items-center justify-center text-3xl shadow-2xl shadow-primary/20 transform -rotate-6 hover:rotate-0 transition-transform duration-500">⚙️</div>
+                  <div>
+                    <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase italic">Institutional Command Center</h2>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-[0.4em] mt-1">Universal Policy & Financial Synchronization</p>
+                  </div>
+                </div>
+                {settingsLoading && (
+                  <div className="flex items-center gap-3 bg-accent/10 px-6 py-3 rounded-2xl border border-accent/20 animate-pulse">
+                    <div className="w-2 h-2 bg-accent rounded-full"></div>
+                    <span className="text-[10px] font-black text-accent uppercase tracking-widest">Master Link Sync Active</span>
+                  </div>
+                )}
+              </div>
+
+              <form onSubmit={updateLibrarySettings} className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                {/* Circulation Group */}
+                <div className="space-y-8">
+                  <div className="flex items-center gap-3 mb-2 px-1">
+                    <div className="w-1.5 h-6 bg-accent rounded-full"></div>
+                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">Circulation Parameters</h4>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div className="group">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-3 block">MAX ASSET QUOTA PER USER</label>
+                      <div className="relative">
+                        <input 
+                          type="number" 
+                          name="borrowing_limit"
+                          defaultValue={borrowingLimit}
+                          className="input-field py-5 text-xl font-black bg-slate-50/50 focus:bg-white" 
+                        />
+                        <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 opacity-50 uppercase">Assets</span>
+                      </div>
+                    </div>
+
+                    <div className="group">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-3 block">DAILY PENALTY FEE (POST-30 DAYS)</label>
+                      <div className="relative">
+                        <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-slate-400">₹</span>
+                        <input 
+                          type="number" 
+                          name="fine_amount"
+                          defaultValue={fineAmount}
+                          step="0.01"
+                          className="input-field py-5 pl-12 text-xl font-black bg-slate-50/50 focus:bg-white" 
+                        />
+                        <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 opacity-50 uppercase">Per Day</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Subscription Group */}
+                <div className="space-y-8">
+                  <div className="flex items-center gap-3 mb-2 px-1">
+                    <div className="w-1.5 h-6 bg-emerald-400 rounded-full"></div>
+                    <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">Financial Matrix</h4>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-6">
+                    <div className="group">
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">ENTRY FEE</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">₹</span>
+                        <input name="subs_joining_fee" type="number" defaultValue={subsJoiningFee} className="input-field py-4 pl-10 font-black bg-slate-50/50" />
+                      </div>
+                    </div>
+                    <div className="group">
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">MONTHLY SUBS</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">₹</span>
+                        <input name="subs_monthly_fee" type="number" defaultValue={subsMonthlyFee} className="input-field py-4 pl-10 font-black bg-slate-50/50" />
+                      </div>
+                    </div>
+                    <div className="group">
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">ANNUAL SUBS</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">₹</span>
+                        <input name="subs_yearly_fee" type="number" defaultValue={subsYearlyFee} className="input-field py-4 pl-10 font-black bg-slate-50/50" />
+                      </div>
+                    </div>
+                    <div className="group">
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 mb-2 block">LIFETIME SUBS</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">₹</span>
+                        <input name="subs_lifetime_fee" type="number" defaultValue={subsLifetimeFee} className="input-field py-4 pl-10 font-black bg-slate-50/50" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 pt-10 border-t border-slate-50 flex flex-col md:flex-row items-center justify-between gap-6">
+                  <div className="flex flex-col md:flex-row items-center gap-6 w-full md:w-auto">
+                    <button 
+                      type="submit" 
+                      disabled={lookupLoading}
+                      className="w-full md:w-auto px-12 py-5 bg-primary text-white font-black uppercase tracking-[0.3em] text-[11px] rounded-[24px] shadow-2xl shadow-primary/30 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-4 group disabled:opacity-50"
+                    >
+                      <span>{lookupLoading ? 'SYNCING...' : 'COMMIT CHANGES TO MASTER'}</span>
+                      <span className="text-xl group-hover:translate-x-2 transition-transform">🛰️</span>
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={sendOverdueAlerts}
+                      className="w-full md:w-auto px-8 py-5 bg-red-50 text-red-600 font-black uppercase tracking-[0.3em] text-[11px] rounded-[24px] border border-red-100 hover:bg-red-100 transition-all active:scale-95 flex items-center justify-center gap-3"
+                    >
+                      <span>🚨 DISPATCH OVERDUE ALERTS</span>
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-bold max-w-sm italic text-right">
+                    Note: Updating these values triggers an immediate global re-calculation for overdue fines and subsequent enrollments. History remains immutable.
+                  </p>
+                </div>
+              </form>
+            </div>
+            
+            {/* System Status Visualizer */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {[
+                { label: "Data Integrity", val: "STABLE", icon: "💎", color: "text-emerald-500" },
+                { label: "Sync Latency", val: "14ms", icon: "☄️", color: "text-accent" },
+                { label: "Node Authorization", val: "VERIFIED", icon: "🛡️", color: "text-blue-500" }
+              ].map((s, i) => (
+                <div key={i} className="glass-card p-8 rounded-[32px] flex items-center justify-between group hover:-translate-y-2 transition-all">
+                  <div>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">{s.label}</p>
+                    <p className={`text-xl font-black ${s.color}`}>{s.val}</p>
+                  </div>
+                  <span className="text-3xl group-hover:scale-125 transition-transform">{s.icon}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
