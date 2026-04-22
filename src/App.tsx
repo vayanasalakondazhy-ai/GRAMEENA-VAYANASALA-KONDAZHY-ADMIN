@@ -1074,11 +1074,60 @@ export default function App() {
   };
 
   // Helper to convert between ISBN-10 and ISBN-13 for better database coverage
+  const isValidISBN10 = (isbn: string) => {
+    if (isbn.length !== 10) return false;
+    let sum = 0;
+    for (let i = 0; i < 9; i++) {
+      let digit = parseInt(isbn[i]);
+      if (isNaN(digit)) return false;
+      sum += (10 - i) * digit;
+    }
+    let last = isbn[9].toUpperCase();
+    let check = (11 - (sum % 11)) % 11;
+    let expected = check === 10 ? 'X' : check.toString();
+    return last === expected;
+  };
+
+  const isValidISBN13 = (isbn: string) => {
+    if (isbn.length !== 13) return false;
+    if (!isbn.startsWith('978') && !isbn.startsWith('979')) return false;
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+      let digit = parseInt(isbn[i]);
+      if (isNaN(digit)) return false;
+      sum += (i % 2 === 0 ? 1 : 3) * digit;
+    }
+    let check = (10 - (sum % 10)) % 10;
+    return parseInt(isbn[12]) === check;
+  };
+
+  const extractISBN = (text: string) => {
+    let clean = text.replace(/[^0-9X]/gi, '').trim().toUpperCase();
+    
+    // 1. Strict ISBN-13 (Starts with 978 or 979)
+    const isbn13Match = clean.match(/(97[89][0-9]{10})/);
+    if (isbn13Match && isValidISBN13(isbn13Match[1])) return isbn13Match[1];
+    
+    // 2. Strict ISBN-10
+    const isbn10Match = clean.match(/([0-9]{9}[0-9X])/);
+    if (isbn10Match && isValidISBN10(isbn10Match[1])) return isbn10Match[1];
+    
+    // 3. Fallback: Any 13-digit EAN (Some local books use non-standard bookland EANs)
+    const ean13Match = clean.match(/([0-9]{13})/);
+    if (ean13Match) return ean13Match[1];
+
+    // 4. Fallback: Any 10-digit sequence (Generic lookup)
+    const generic10Match = clean.match(/([0-9]{10})/);
+    if (generic10Match) return generic10Match[1];
+    
+    return null;
+  };
+
   const getIsbnVariants = (isbn: string) => {
     const clean = isbn.replace(/[^0-9X]/gi, '').toUpperCase();
     const variants = [clean];
     
-    // Robust conversion logic for 978-based ISBNs
+    // EAN-13 to ISBN-10
     if (clean.length === 13 && clean.startsWith("978")) {
       // Calculate ISBN-10 Checksum
       let s = clean.substring(3, 12);
@@ -1086,8 +1135,8 @@ export default function App() {
       for (let i = 0; i < 9; i++) {
         sum += (10 - i) * parseInt(s[i]);
       }
-      let check = 11 - (sum % 11);
-      let finalCheck = check === 10 ? 'X' : (check === 11 ? '0' : check.toString());
+      let check = (11 - (sum % 11)) % 11;
+      let finalCheck = check === 10 ? 'X' : check.toString();
       variants.push(s + finalCheck);
     } else if (clean.length === 10) {
       // ISBN-10 to ISBN-13 (978 prefix)
@@ -1107,26 +1156,27 @@ export default function App() {
     if (e) e.preventDefault();
     let rawIsbn = manualIsbn || isbnLookup;
     
-    // 1. ADVANCED SANITIZATION & EXTRACTION
-    let digitsOnly = rawIsbn.replace(/[^0-9X]/gi, '').trim().toUpperCase();
-    let targetIsbn = digitsOnly;
+    // 1. SMART EXTRACTION & SANITIZATION
+    const targetIsbn = extractISBN(rawIsbn);
     
-    // Smart Truncation for EAN-13 + 5 Price Addon
-    if (digitsOnly.length > 13) {
-      if (digitsOnly.startsWith("978") || digitsOnly.startsWith("979")) {
-        targetIsbn = digitsOnly.substring(0, 13);
-      } else if (digitsOnly.length === 18 || digitsOnly.length === 17) {
-         targetIsbn = digitsOnly.substring(0, 13);
-      }
+    if (!targetIsbn) {
+      if (manualIsbn) return; // Silent if from scanner
+      return Swal.fire("Invalid ISBN", "Could not detect a valid ISBN-10 or ISBN-13 pattern.", "warning");
     }
 
-    setIsbnLookup(targetIsbn);
-
-    if (!targetIsbn || targetIsbn.length < 10) {
-      return Swal.fire("Input Too Short", "Please provide a valid Barcode/ISBN.", "warning");
+    // Determine the "Preferred" ISBN for display and storage (ISBN-10 preferred by many users)
+    let displayIsbn = targetIsbn;
+    const variants = getIsbnVariants(targetIsbn);
+    const isbn10 = variants.find(v => v.length === 10);
+    
+    // Auto-convert legacy 13-digit scans to familiar 10-digit ISBNs for the UI
+    if (isbn10) {
+      displayIsbn = isbn10;
     }
 
-    const isbnVariants = getIsbnVariants(targetIsbn);
+    setIsbnLookup(displayIsbn);
+
+    const isbnVariants = variants;
 
     setLookupLoading(true);
     setScannedBook(null);
@@ -1160,7 +1210,7 @@ export default function App() {
             
             if (isRelevant) {
               candidates.push({
-                isbn: targetIsbn,
+                isbn: displayIsbn, // Set to prefered format (ISBN-10)
                 title: info.title || "Untitled",
                 author: info.authors ? info.authors.join(", ") : "Unknown Author",
                 publisher: info.publisher || "Unknown Publisher",
@@ -1179,7 +1229,7 @@ export default function App() {
           if (data[bookKey]) {
             const olBook = data[bookKey];
             candidates.push({
-              isbn: targetIsbn,
+              isbn: displayIsbn, // Set to prefered format (ISBN-10)
               title: olBook.title || "Untitled",
               author: olBook.authors ? olBook.authors.map((a: any) => a.name).join(", ") : "Unknown Author",
               publisher: olBook.publishers?.[0]?.name || "Unknown Publisher",
@@ -1196,8 +1246,9 @@ export default function App() {
         setLookupStep("AI Meta-Search (Checking RRDNA, ISBNLookup.org & Global Registries)...");
         try {
           const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-          const prompt = `Identify book metadata for ISBN: ${targetIsbn}. 
-            Identify info from Raja Rammohun Roy National Agency (RRDNA/isbn.gov.in), ISBNLookup.org, Worldcat, DC Books, Mathrubhumi.
+          const prompt = `Identify book metadata for barcode: ${targetIsbn}. 
+            The book identifier could be an ISBN-13, EAN, or ISBN-10.
+            Look into Raja Rammohun Roy National Agency (RRDNA/isbn.gov.in), ISBNLookup.org, Worldcat, DC Books, Mathrubhumi.
             Find accurate title, authors, publisher, category, and language. 
             Return up to 3 candidates in JSON.`;
             
@@ -1230,7 +1281,7 @@ export default function App() {
             aiResults.forEach((res: any) => {
               candidates.push({
                 ...res,
-                isbn: targetIsbn,
+                isbn: displayIsbn, // Set to prefered format (ISBN-10)
                 source: 'AI Indian Agency Search',
                 language: res.language || "MALAYALAM"
               });
@@ -1335,9 +1386,16 @@ export default function App() {
         }
 
         const scanConfig = { 
-          fps: 15, 
-          qrbox: { width: 320, height: 160 }, 
+          fps: 25, 
+          qrbox: { width: 400, height: 200 }, 
           aspectRatio: 1.777778,
+          formatsToSupport: [ 
+            Html5QrcodeSupportedFormats.EAN_13, 
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.CODE_39
+          ],
           experimentalFeatures: { useBarCodeDetectorIfSupported: true }
         };
 
@@ -1345,12 +1403,20 @@ export default function App() {
         await html5QrCode.start(
           targetId || { facingMode: "environment" }, 
           scanConfig, 
-          (decodedText) => {
-            playBeep();
-            html5QrCode.stop().then(() => {
-              lookupISBN(undefined, decodedText);
-              setShowCamera(false);
-            }).catch(e => console.error("Stop error:", e));
+          async (decodedText) => {
+            // High fidelity filtering: trigger only on valid book ISBNs
+            const foundISBN = extractISBN(decodedText);
+            
+            if (foundISBN) {
+              playBeep();
+              try {
+                await html5QrCode.stop();
+                lookupISBN(undefined, foundISBN);
+                setShowCamera(false);
+              } catch (e) {
+                console.error("Stop error:", e);
+              }
+            }
           },
           () => {}
         );
@@ -2398,57 +2464,59 @@ export default function App() {
 
                 {showCamera ? (
                   <div className="w-full max-w-md mt-6 relative group flex flex-col items-center">
-                    {(cameras.length > 1 || cameraError) && (
-                      <div className="mb-4 w-full">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
-                          {cameraError ? 'Select Troubleshooting Camera' : 'Switch Camera Source'}
-                        </label>
-                        <select 
-                          className="input-field text-xs bg-white border-2 border-accent/20"
-                          value={selectedCamera}
-                          onChange={(e) => handleCameraChange(e.target.value)}
-                        >
-                          <option value="">-- Choose Hardware Source --</option>
-                          {cameras.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                        </select>
-                        {cameraError && (
-                          <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-[10px] text-red-600 font-medium leading-relaxed">
-                            ⚠️ {cameraError}
-                          </div>
-                        )}
+                    <div className="w-full h-[300px] bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border-4 border-slate-800 relative">
+                      <div id="reader" className="w-full h-full"></div>
+                      
+                      {/* High-Tech Overlay */}
+                      <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                        <div className="w-[80%] h-[50%] border-2 border-accent/40 rounded-2xl relative overflow-hidden">
+                          {/* Animated Scan Line */}
+                          <div className="absolute top-0 left-0 w-full h-[3px] bg-accent shadow-[0_0_20px_rgba(14,165,233,0.8)] animate-[scan_2.5s_ease-in-out_infinite]"></div>
+                          
+                          {/* Corners */}
+                          <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-accent rounded-tl-xl opacity-80"></div>
+                          <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-accent rounded-tr-xl opacity-80"></div>
+                          <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-accent rounded-bl-xl opacity-80"></div>
+                          <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-accent rounded-br-xl opacity-80"></div>
+                        </div>
+                        <div className="mt-6 px-5 py-2 bg-black/50 backdrop-blur-md rounded-full text-white text-[9px] font-black uppercase tracking-[0.3em] border border-white/10">
+                          Align Barcode in the Frame
+                        </div>
                       </div>
-                    )}
-                    
-                    <div id="reader" className={`w-full overflow-hidden rounded-xl border-4 ${cameraError ? 'border-red-200 shadow-none' : 'border-accent shadow-2xl'} bg-slate-900 min-h-[250px] flex items-center justify-center text-center p-8`}>
+
                       {cameraError && (
-                        <div className="text-white opacity-40">
-                          <div className="text-4xl mb-4">📷</div>
-                          <p className="text-xs">Camera Feed Blocked</p>
+                        <div className="absolute inset-0 bg-error/95 flex items-center justify-center p-8 text-center text-white backdrop-blur-sm">
+                          <div className="max-w-xs">
+                            <span className="text-4xl block mb-4">📷</span>
+                            <p className="font-black text-sm uppercase tracking-widest mb-4">Hardware Busy</p>
+                            <p className="text-[10px] font-bold leading-relaxed opacity-90">{cameraError}</p>
+                            <button onClick={() => setShowCamera(false)} className="mt-6 px-6 py-2 bg-white text-error rounded-full font-black text-[10px] uppercase tracking-widest">Close</button>
+                          </div>
                         </div>
                       )}
                     </div>
-
-                    {!cameraError && (
-                      <div className="absolute top-[45%] left-0 right-0 pointer-events-none flex items-center justify-center opacity-60">
-                        <div className="w-[85%] h-32 border-2 border-accent border-dashed rounded-lg animate-pulse"></div>
-                      </div>
-                    )}
-
-                    <div className="mt-6 flex gap-3">
-                      {cameraError && (
-                        <button 
-                          onClick={() => startCameraScanner()}
-                          className="bg-accent text-white px-6 py-2 rounded-lg font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all shadow-lg shadow-accent/20"
-                        >
-                          Retry Connection
-                        </button>
+                    
+                    <div className="mt-6 w-full flex flex-col gap-4">
+                      {cameras.length > 1 && (
+                        <div className="px-2">
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2 px-1">Switch Lens</label>
+                          <select 
+                            className="w-full bg-slate-100 border-2 border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-slate-600 focus:border-accent outline-none transition-all"
+                            value={selectedCamera || ""}
+                            onChange={(e) => handleCameraChange(e.target.value)}
+                          >
+                            {cameras.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                          </select>
+                        </div>
                       )}
-                      <button 
-                        onClick={stopCameraScanner}
-                        className="bg-slate-200 text-slate-700 px-6 py-2 rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-slate-300 transition-all font-sans"
-                      >
-                        {cameraError ? 'Close' : 'Cancel'}
-                      </button>
+                      <div className="flex gap-2 justify-center">
+                        <button 
+                          onClick={stopCameraScanner}
+                          className="px-8 py-2.5 bg-slate-800 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-700 transition-all shadow-lg shadow-slate-200"
+                        >
+                          Terminate Scan
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : (

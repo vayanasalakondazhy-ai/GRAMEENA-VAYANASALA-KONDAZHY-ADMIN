@@ -15,6 +15,12 @@
   --color-surface-border: #E2E8F0;
   --color-text-main: #1E293B;
   --color-text-muted: #64748B;
+
+  @keyframes scan {
+    0% { top: 0%; opacity: 1; }
+    50% { top: 100%; opacity: 0.5; }
+    100% { top: 0%; opacity: 1; }
+  }
 }
 
 @layer base {
