@@ -12,12 +12,55 @@ import Papa from "papaparse";
 import Sanscript from "sanscript";
 
 // Supabase Client
-const supabaseUrl = "https://bfrgzovowzrmnygoxnsn.supabase.co";
-const supabaseKey = "sb_publishable_MI1Jw2-YYczpRLiSvfs6TA_8h1B1FMy";
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://bfrgzovowzrmnygoxnsn.supabase.co";
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_MI1Jw2-YYczpRLiSvfs6TA_8h1B1FMy";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Connection Status Hook
+const useSupabaseHealth = () => {
+  const [status, setStatus] = useState<'connected' | 'error' | 'checking'>('checking');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const checkConnection = async () => {
+      try {
+        if (!supabaseUrl || !supabaseKey || supabaseUrl.includes('placeholder') || supabaseKey.includes('YOUR_SUPABASE')) {
+          setStatus('error');
+          setErrorMessage("Supabase Keys Missing: Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your Secrets panel or update the hardcoded values.");
+          return;
+        }
+
+        const { error } = await supabase.from('users').select('id').limit(1);
+        if (error) {
+           console.warn("Supabase Health Check Warning:", error);
+           if (error.message.includes('relation "public.users" does not exist')) {
+             setStatus('error');
+             setErrorMessage("Database Connected BUT Table 'users' not found in public schema. Check your migrations.");
+           } else if (error.code === '401' || error.message.includes('Invalid API key') || error.message.includes('JWT')) {
+             setStatus('error');
+             setErrorMessage("Auth Error: Invalid Supabase Project Key. Ensure you use the 'anon/public' key.");
+           } else {
+             setStatus('connected'); 
+           }
+        } else {
+          setStatus('connected');
+        }
+      } catch (err: any) {
+        console.error("Supabase Health Check Fatal Error:", err);
+        setStatus('error');
+        setErrorMessage("Network Failure: Could not reach Supabase endpoint.");
+      }
+    };
+    checkConnection();
+  }, []);
+
+  return { status, errorMessage };
+};
+
 export default function App() {
+  const { status: dbStatus, errorMessage: dbError } = useSupabaseHealth();
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [isRegistering, setIsRegistering] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [counts, setCounts] = useState({ books: 0, users: 0, issued: 0 });
   const [members, setMembers] = useState<any[]>([]);
@@ -308,32 +351,49 @@ export default function App() {
 
   // Fetch Dashboard Counts
   const loadDashboard = useCallback(async () => {
-    const { count: bCount } = await supabase.from("books").select("*", { count: "exact", head: true });
-    const { count: uCount } = await supabase.from("users").select("*", { count: "exact", head: true });
-    const { count: iCount } = await supabase.from("issued_books").select("*", { count: "exact", head: true });
-    setCounts({ 
-      books: bCount || 0, 
-      users: uCount || 0, 
-      issued: iCount || 0 
-    });
+    try {
+      const { count: bCount, error: bErr } = await supabase.from("books").select("*", { count: "exact", head: true });
+      const { count: uCount, error: uErr } = await supabase.from("users").select("*", { count: "exact", head: true });
+      const { count: iCount, error: iErr } = await supabase.from("issued_books").select("*", { count: "exact", head: true });
+      
+      if (bErr || uErr || iErr) {
+        console.warn("Dashboard sync warning:", bErr || uErr || iErr);
+      }
+
+      setCounts({ 
+        books: bCount || 0, 
+        users: uCount || 0, 
+        issued: iCount || 0 
+      });
+    } catch (e) {
+      console.error("Dashboard sync fatal error:", e);
+    }
   }, []);
 
   // Members
   const loadMembers = useCallback(async () => {
-    const { data } = await supabase.from("users").select("*");
-    if (data) {
-      const filtered = data.filter(u => {
-        const name = (u.name || "").toLowerCase();
-        const phone = (u.phone || "");
-        const searchText = memberSearch.toLowerCase();
-        
-        const matchesSearch = name.includes(searchText) || phone.includes(searchText);
-        const matchesSub = memberFilterSub === "all" || (u.subscription && u.subscription.toUpperCase().includes(memberFilterSub.toUpperCase()));
-        const matchesDate = !memberFilterDate || (u.created_at && u.created_at.startsWith(memberFilterDate));
-        
-        return matchesSearch && matchesSub && matchesDate;
-      });
-      setMembers(filtered);
+    try {
+      const { data, error } = await supabase.from("users").select("*");
+      if (error) {
+        console.error("Supabase loadMembers Error:", error);
+        return;
+      }
+      if (data) {
+        const filtered = data.filter(u => {
+          const name = (u.name || "").toLowerCase();
+          const phone = (u.phone || "");
+          const searchText = memberSearch.toLowerCase();
+          
+          const matchesSearch = name.includes(searchText) || phone.includes(searchText);
+          const matchesSub = memberFilterSub === "all" || (u.subscription && u.subscription.toUpperCase().includes(memberFilterSub.toUpperCase()));
+          const matchesDate = !memberFilterDate || (u.created_at && u.created_at.startsWith(memberFilterDate));
+          
+          return matchesSearch && matchesSub && matchesDate;
+        });
+        setMembers(filtered);
+      }
+    } catch (err) {
+      console.error("Unexpected error in loadMembers:", err);
     }
   }, [memberSearch, memberFilterSub, memberFilterDate]);
 
@@ -563,55 +623,95 @@ export default function App() {
   // CRUD Operations
   const addUser = async (e: FormEvent) => {
     e.preventDefault();
+    if (isRegistering) return;
+    setIsRegistering(true);
     const form = e.target as HTMLFormElement;
-    const formData = new FormData(form);
-    const rawData = Object.fromEntries(formData.entries());
     
-    // Process subscription into a single string for the 'subscription' column
-    const type = rawData.sub_type as string;
-    const count = rawData.sub_duration || "1";
-    const subStr = type === 'lifetime' ? 'LIFETIME' : `${type.toUpperCase()} (${count} ${type === 'monthly' ? 'Months' : 'Years'})`;
-    
-    // Calculate estimated joining fee (for librarian's knowledge, though just storing the status here)
-    let total = subsJoiningFee;
-    if (type === 'monthly') total += subsMonthlyFee * Number(count);
-    else if (type === 'yearly') total += subsYearlyFee * Number(count);
-    else total += subsLifetimeFee;
+    try {
+      const formData = new FormData(form);
+      const rawData = Object.fromEntries(formData.entries());
+      
+      console.log("Attempting to Register Member:", rawData.name);
 
-    const expiry = type === 'lifetime' 
-      ? new Date(new Date().getFullYear() + 100, 0, 1) 
-      : type === 'monthly' 
-        ? new Date(new Date().setMonth(new Date().getMonth() + Number(count)))
-        : new Date(new Date().setFullYear(new Date().getFullYear() + Number(count)));
+      // Validation
+      if (!rawData.name || !rawData.phone) {
+        throw new Error("Name and Phone are mandatory fields.");
+      }
+      
+      // Process subscription
+      const type = (rawData.sub_type || 'monthly') as string;
+      const count = rawData.sub_duration || "1";
+      const subStr = type === 'lifetime' ? 'LIFETIME' : `${type.toUpperCase()} (${count} ${type === 'monthly' ? 'Months' : 'Years'})`;
+      
+      let total = subsJoiningFee;
+      if (type === 'monthly') total += subsMonthlyFee * Number(count);
+      else if (type === 'yearly') total += subsYearlyFee * Number(count);
+      else total += subsLifetimeFee;
 
-    const user = {
-      name: rawData.name,
-      phone: rawData.phone,
-      address: rawData.address,
-      pincode: rawData.pincode,
-      email: rawData.email,
-      gender: rawData.gender,
-      dob: rawData.dob,
-      member_id: rawData.member_id,
-      occupation: rawData.occupation,
-      notes: rawData.notes,
-      subscription: subStr,
-      expiry_date: expiry.toISOString()
-    };
+      const now = new Date();
+      let expiry = new Date();
+      if (type === 'lifetime') {
+        expiry = new Date(now.getFullYear() + 100, 0, 1);
+      } else if (type === 'monthly') {
+        expiry.setMonth(now.getMonth() + Number(count));
+      } else {
+        expiry.setFullYear(now.getFullYear() + Number(count));
+      }
 
-    const { error } = await supabase.from("users").insert([user]);
-    if (error) alert(error.message);
-    else {
+      const user = {
+        name: rawData.name,
+        phone: rawData.phone,
+        address: rawData.address,
+        pincode: rawData.pincode,
+        email: rawData.email,
+        gender: rawData.gender,
+        dob: rawData.dob,
+        member_id: rawData.member_id || `M-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+        occupation: rawData.occupation,
+        notes: rawData.notes,
+        subscription: subStr,
+        expiry_date: expiry.toISOString(),
+        created_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase.from("users").insert([user]).select();
+      
+      if (error) {
+        console.error("Supabase Database Error:", error);
+        let msg = error.message;
+        if (error.code === '42P01') msg = "Table 'users' does not exist in your database.";
+        if (error.code === '23505') msg = "Member ID or Phone already exists.";
+        
+        Swal.fire({
+          icon: 'error',
+          title: 'Database Rejection',
+          text: msg,
+          footer: `<div class="text-[10px] text-slate-400">Error Code: ${error.code} | Hint: Check your Supabase table schema matches these fields.</div>`,
+          confirmButtonColor: '#3b82f6'
+        });
+      } else {
+        console.log("Successfully added user:", data);
+        Swal.fire({
+          icon: 'success',
+          title: 'Registration Successful',
+          html: `<div class="text-left"><p class="text-xs mb-2">Member <b>${user.name}</b> has been enrolled into the core registry.</p><p class="text-[10px] bg-slate-50 p-2 rounded border border-slate-100">Initial payment due: <b class="text-emerald-600">₹${total}</b></p></div>`,
+          confirmButtonColor: '#10b981'
+        });
+        form.reset();
+        setGenMemberId("");
+        loadMembers();
+        loadDashboard();
+      }
+    } catch (err: any) {
+      console.error("Critical Registration Failure:", err);
       Swal.fire({
-        icon: 'success',
-        title: 'Member Registered',
-        html: `<p class="text-xs">Initial payment due: <b class="text-accent text-lg">₹${total}</b></p><p class="text-[9px] mt-2 text-slate-400">Stored subscription: ${subStr}</p>`,
-        confirmButtonColor: '#3b82f6'
+        icon: 'error',
+        title: 'Application Exception',
+        text: err.message || "Failed to process enrollment sequence.",
+        confirmButtonColor: '#ef4444'
       });
-      form.reset();
-      setGenMemberId("");
-      loadMembers();
-      loadDashboard();
+    } finally {
+      setIsRegistering(false);
     }
   };
 
@@ -1501,9 +1601,33 @@ export default function App() {
               </div>
             </div>
             <div className="flex flex-col items-end">
-               <div className="db-status flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100 text-[10px] font-black tracking-widest mb-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                CORE_ENGINE: ACTIVE
+               <div 
+                onClick={() => {
+                  if (dbStatus === 'error') {
+                    Swal.fire({
+                      title: 'Database Connectivity Intel',
+                      text: dbError || 'Unknown connection fault.',
+                      icon: 'warning',
+                      confirmButtonColor: '#3b82f6',
+                      footer: '<p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center">Troubleshoot: Verify Secret Keys in AI Studio Settings.</p>'
+                    });
+                  }
+                }}
+                className={`db-status flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-black tracking-widest mb-2 transition-all ${
+                  dbStatus === 'connected' ? 'bg-emerald-50 text-emerald-700 border-emerald-100 cursor-help' : 
+                  dbStatus === 'checking' ? 'bg-amber-50 text-amber-700 border-amber-100 cursor-wait' :
+                  'bg-red-50 text-red-700 border-red-100 cursor-pointer animate-pulse hover:bg-red-100'
+                }`}
+                title={dbError || (dbStatus === 'connected' ? 'Sync Active' : 'Establishing Link...')}
+              >
+                <span className={`w-2 h-2 rounded-full animate-pulse ${
+                  dbStatus === 'connected' ? 'bg-emerald-500' : 
+                  dbStatus === 'checking' ? 'bg-amber-500' :
+                  'bg-red-500'
+                }`}></span>
+                {dbStatus === 'connected' ? 'SUPABASE: ONLINE' : 
+                 dbStatus === 'checking' ? 'SUPABASE: SYNCING' :
+                 'SUPABASE: OFFLINE'}
               </div>
               <div className="flex items-center gap-3">
                 <p className="text-2xl font-black text-slate-800 tracking-tighter tabular-nums font-mono">
@@ -1732,8 +1856,19 @@ export default function App() {
                     </div>
                   </div>
 
-                  <button type="submit" className="w-full py-5 bg-primary text-white rounded-3xl text-sm font-black tracking-[0.2em] uppercase shadow-[0_15px_40px_rgba(15,23,42,0.3)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3">
-                    🚀 REGISTER Member to Database
+                  <button 
+                    type="submit" 
+                    disabled={isRegistering}
+                    className={`w-full py-5 bg-primary text-white rounded-3xl text-sm font-black tracking-[0.2em] uppercase shadow-[0_15px_40px_rgba(15,23,42,0.3)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 ${isRegistering ? 'opacity-70 cursor-not-allowed' : ''}`}
+                  >
+                    {isRegistering ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        UPDATING REGISTRY...
+                      </>
+                    ) : (
+                      <>🚀 REGISTER Member to Database</>
+                    )}
                   </button>
                 </form>
               </div>
@@ -1762,12 +1897,19 @@ export default function App() {
                   <div className="flex flex-col gap-1 text-left">
                     <h2 className="text-2xl font-black text-slate-900 tracking-tighter leading-none">Database Registry</h2>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1.5 flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
-                      Digital Core Access Ledger
+                      <span className={`w-1.5 h-1.5 rounded-full ${dbStatus === 'connected' ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`}></span>
+                      {dbStatus === 'connected' ? 'Digital Core Access Ledger - Online' : 'Digital Core Access Ledger - Check Connection'}
                     </p>
                   </div>
                   
                   <div className="flex items-center gap-4">
+                    <button 
+                      onClick={() => { loadMembers(); loadDashboard(); }}
+                      className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all"
+                      title="Forced Re-Sync"
+                    >
+                      🔄
+                    </button>
                     <button 
                       onClick={exportToCSV}
                       className="px-5 py-3 rounded-2xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-sm flex items-center gap-2"
@@ -1837,14 +1979,27 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {members.map((u, idx) => (
-                        <motion.tr 
-                          key={u.id} 
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: idx * 0.03 }}
-                          className="group hover:bg-slate-50/50 transition-all duration-300"
-                        >
+                      {members.length === 0 ? (
+                        <tr>
+                          <td colSpan={3} className="px-8 py-20 text-center">
+                            <div className="flex flex-col items-center gap-4 opacity-30">
+                              <span className="text-6xl">📭</span>
+                              <div>
+                                <p className="text-sm font-black text-slate-800 uppercase tracking-widest">No Records Found</p>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter mt-1">Registry is currently void or filtered out</p>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        members.map((u, idx) => (
+                          <motion.tr 
+                            key={u.id || idx} 
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: idx * 0.03 }}
+                            className="group hover:bg-slate-50/50 transition-all duration-300"
+                          >
                           <td className="px-8 py-6">
                             <div className="flex items-center gap-4">
                               <div className="w-12 h-12 bg-slate-100 rounded-[18px] flex items-center justify-center text-lg font-black text-slate-400 group-hover:bg-primary group-hover:text-white group-hover:rotate-12 group-hover:scale-110 transition-all shadow-sm">
@@ -1918,20 +2073,9 @@ export default function App() {
                             </div>
                           </td>
                         </motion.tr>
-                      ))}
+                      )))}
                     </tbody>
                   </table>
-
-                  {members.length === 0 && (
-                    <div className="p-20 text-center">
-                        <motion.div 
-                          animate={{ rotate: [0, 10, -10, 0] }}
-                          transition={{ repeat: Infinity, duration: 4 }}
-                          className="text-4xl mb-4 opacity-20"
-                        >📂</motion.div>
-                        <p className="text-[10px] font-black uppercase text-slate-300 tracking-[0.3em]">No data matching criteria found.</p>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
@@ -3077,11 +3221,22 @@ export default function App() {
       )}
 
       {editBookModal && (
-        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-surface-border">
-            <div className="bg-primary p-6 text-white text-center">
-              <h3 className="text-lg font-bold tracking-tight">Modify Asset Entry</h3>
-              <p className="text-[10px] text-white/50 uppercase tracking-widest mt-1">STOCK ID: {editBookModal.stocknumber}</p>
+        <div 
+          onClick={(e) => e.target === e.currentTarget && setEditBookModal(null)}
+          className="fixed inset-0 bg-primary/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 cursor-pointer"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-surface-border cursor-default">
+            <div className="bg-primary p-6 text-white text-center flex justify-between items-center">
+              <div className="text-left">
+                <h3 className="text-lg font-bold tracking-tight">Modify Asset Entry</h3>
+                <p className="text-[10px] text-white/50 uppercase tracking-widest mt-1">STOCK ID: {editBookModal.stocknumber}</p>
+              </div>
+              <button 
+                onClick={() => setEditBookModal(null)}
+                className="w-8 h-8 flex items-center justify-center bg-white/10 rounded-full hover:bg-white/20 transition-all text-sm"
+              >
+                ✕
+              </button>
             </div>
             <form onSubmit={updateBook} className="p-8 space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -3118,11 +3273,22 @@ export default function App() {
       )}
 
       {editMemberModal && (
-        <div className="fixed inset-0 bg-primary/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto border border-surface-border">
-            <div className="bg-primary p-6 text-white text-center sticky top-0 z-10 shadow-lg">
-              <h3 className="text-lg font-bold tracking-tight">Sync Member Profile</h3>
-              <p className="text-[10px] text-white/50 uppercase tracking-widest mt-1">ACCOUNT: {editMemberModal.phone}</p>
+        <div 
+          onClick={(e) => e.target === e.currentTarget && setEditMemberModal(null)}
+          className="fixed inset-0 bg-primary/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 cursor-pointer"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto border border-surface-border cursor-default">
+            <div className="bg-primary p-6 text-white text-center sticky top-0 z-10 shadow-lg flex justify-between items-center">
+              <div className="text-left">
+                <h3 className="text-lg font-bold tracking-tight">Sync Member Profile</h3>
+                <p className="text-[10px] text-white/50 uppercase tracking-widest mt-1">ACCOUNT: {editMemberModal.phone}</p>
+              </div>
+              <button 
+                onClick={() => setEditMemberModal(null)}
+                className="w-8 h-8 flex items-center justify-center bg-white/10 rounded-full hover:bg-white/20 transition-all text-sm"
+              >
+                ✕
+              </button>
             </div>
             <form onSubmit={updateMember} className="p-8 space-y-4">
               <input name="name" defaultValue={editMemberModal.name} placeholder="Full Name" className="input-field" />
@@ -3170,16 +3336,27 @@ export default function App() {
       )}
 
       {viewUserModal && (
-        <div className="fixed inset-0 bg-primary/60 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-surface-border animate-in zoom-in-95 duration-200">
-            <div className="bg-slate-800 px-4 py-2 flex justify-between items-center text-[10px] font-black uppercase text-white/50 tracking-widest border-b border-white/5">
+        <div 
+          onClick={(e) => e.target === e.currentTarget && setViewUserModal(null)}
+          className="fixed inset-0 bg-primary/60 backdrop-blur-md flex items-center justify-center p-4 z-50 cursor-pointer"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-surface-border animate-in zoom-in-95 duration-200 cursor-default">
+            <div className="bg-slate-800 px-4 py-3 flex justify-between items-center text-[10px] font-black uppercase text-white/50 tracking-widest border-b border-white/5">
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setViewUserModal(null)}
+                  className="w-6 h-6 flex items-center justify-center bg-white/10 rounded-lg hover:bg-white/20 transition-all text-white/80"
+                >
+                  ←
+                </button>
+                <span>Profile Intelligence</span>
+              </div>
               <button 
                 onClick={() => setViewUserModal(null)}
-                className="hover:text-white transition-colors"
+                className="w-6 h-6 flex items-center justify-center bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500 hover:text-white transition-all text-xs"
               >
-                ← Back to Registry
+                ✕
               </button>
-              <span>Profile Intelligence</span>
             </div>
             <div className="bg-gradient-to-br from-primary to-slate-800 p-8 text-white relative">
               <div className="w-16 h-16 bg-accent/20 rounded-full flex items-center justify-center mb-4 border border-white/20">
@@ -3290,16 +3467,27 @@ export default function App() {
 
       {/* VIEW BOOK MODAL */}
       {viewBookModal && (
-        <div className="fixed inset-0 bg-primary/60 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-surface-border animate-in zoom-in-95 duration-200">
-            <div className="bg-slate-800 px-4 py-2 flex justify-between items-center text-[10px] font-black uppercase text-white/50 tracking-widest border-b border-white/5">
+        <div 
+          onClick={(e) => e.target === e.currentTarget && setViewBookModal(null)}
+          className="fixed inset-0 bg-primary/60 backdrop-blur-md flex items-center justify-center p-4 z-50 cursor-pointer"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-surface-border animate-in zoom-in-95 duration-200 cursor-default">
+            <div className="bg-slate-800 px-4 py-3 flex justify-between items-center text-[10px] font-black uppercase text-white/50 tracking-widest border-b border-white/5">
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setViewBookModal(null)}
+                  className="w-6 h-6 flex items-center justify-center bg-white/10 rounded-lg hover:bg-white/20 transition-all text-white/80"
+                >
+                  ←
+                </button>
+                <span>Asset Intelligence</span>
+              </div>
               <button 
                 onClick={() => setViewBookModal(null)}
-                className="hover:text-white transition-colors"
+                className="w-6 h-6 flex items-center justify-center bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500 hover:text-white transition-all text-xs"
               >
-                ← Back to Inventory
+                ✕
               </button>
-              <span>Asset Intelligence</span>
             </div>
             <div className="bg-gradient-to-br from-accent to-slate-800 p-8 text-white relative text-left">
               <div className="w-16 h-16 bg-white/10 rounded-[20px] flex items-center justify-center mb-6 shadow-xl border border-white/20">
