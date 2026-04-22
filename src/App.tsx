@@ -7,6 +7,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, LineChart, Line, Legend 
 } from "recharts";
+import { Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Papa from "papaparse";
 import Sanscript from "sanscript";
@@ -97,6 +98,8 @@ export default function App() {
   const [subsLifetimeFee, setSubsLifetimeFee] = useState(1000);
   const [subsJoiningFee, setSubsJoiningFee] = useState(10);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [financialStats, setFinancialStats] = useState({ total: 0, fines: 0, subs: 0 });
   const [addMode, setAddMode] = useState<"manual" | "barcode">("manual");
   const [isbnLookup, setIsbnLookup] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -148,6 +151,49 @@ export default function App() {
     }
   };
 
+  const loadTransactions = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.from("transactions").select("*").order('created_at', { ascending: false });
+      if (error) {
+        if (error.message.includes("relation \"public.transactions\" does not exist")) {
+          console.warn("Transactions table not found. Financial features disabled.");
+          return;
+        }
+        console.error("Ledger sync error:", error);
+        return;
+      }
+      if (data) {
+        setTransactions(data);
+        const stats = data.reduce((acc: any, curr: any) => {
+          acc.total += Number(curr.amount || 0);
+          if (curr.type === 'fine') acc.fines += Number(curr.amount || 0);
+          else acc.subs += Number(curr.amount || 0);
+          return acc;
+        }, { total: 0, fines: 0, subs: 0 });
+        setFinancialStats(stats);
+      }
+    } catch (e) {
+      console.error("Ledger fatal error:", e);
+    }
+  }, []);
+
+  const recordTransaction = async (type: 'fine' | 'subscription' | 'joining', amount: number, userPhone: string, notes: string) => {
+    try {
+      const { error } = await supabase.from("transactions").insert([{
+        type,
+        amount,
+        user_phone: userPhone,
+        notes,
+        created_at: new Date().toISOString()
+      }]);
+      if (!error) {
+        loadTransactions();
+        logAudit("FINANCIAL", `Recorded ${type} of ₹${amount} for ${userPhone}`);
+      }
+    } catch (e) {
+      console.warn("Transaction persistence failed:", e);
+    }
+  };
   const [issueSearchVal, setIssueSearchVal] = useState("");
   const [foundIssueBooks, setFoundIssueBooks] = useState<any[]>([]);
   const [selectedIssueBook, setSelectedIssueBook] = useState<any>(null);
@@ -373,7 +419,7 @@ export default function App() {
   // Members
   const loadMembers = useCallback(async () => {
     try {
-      const { data, error } = await supabase.from("users").select("*");
+      const { data, error } = await supabase.from("users").select("*").order('created_at', { ascending: false });
       if (error) {
         console.error("Supabase loadMembers Error:", error);
         return;
@@ -382,7 +428,7 @@ export default function App() {
         const filtered = data.filter(u => {
           const name = (u.name || "").toLowerCase();
           const phone = (u.phone || "");
-          const searchText = memberSearch.toLowerCase();
+          const searchText = memberSearch.toLowerCase().trim();
           
           const matchesSearch = name.includes(searchText) || phone.includes(searchText);
           const matchesSub = memberFilterSub === "all" || (u.subscription && u.subscription.toUpperCase().includes(memberFilterSub.toUpperCase()));
@@ -608,8 +654,9 @@ export default function App() {
     if (!issuedData) return;
 
     const filtered = issuedData.filter(d => {
-      if (returnType === "stock") return (d.stock_number || "").toLowerCase().includes(returnSearchVal.toLowerCase());
-      return (d.book_id || "").toLowerCase().includes(returnSearchVal.toLowerCase());
+      const search = returnSearchVal.toLowerCase().trim();
+      if (returnType === "stock") return (d.stock_number || "").toLowerCase().includes(search);
+      return (d.book_id || "").toLowerCase().includes(search);
     });
 
     const results = await Promise.all(filtered.map(async d => {
@@ -631,16 +678,19 @@ export default function App() {
       const formData = new FormData(form);
       const rawData = Object.fromEntries(formData.entries());
       
-      console.log("Attempting to Register Member:", rawData.name);
+      const name = String(rawData.name || "");
+      const phone = String(rawData.phone || "");
+
+      console.log("Attempting to Register Member:", name);
 
       // Validation
-      if (!rawData.name || !rawData.phone) {
+      if (!name || !phone) {
         throw new Error("Name and Phone are mandatory fields.");
       }
       
       // Process subscription
-      const type = (rawData.sub_type || 'monthly') as string;
-      const count = rawData.sub_duration || "1";
+      const type = String(rawData.sub_type || 'monthly');
+      const count = String(rawData.sub_duration || "1");
       const subStr = type === 'lifetime' ? 'LIFETIME' : `${type.toUpperCase()} (${count} ${type === 'monthly' ? 'Months' : 'Years'})`;
       
       let total = subsJoiningFee;
@@ -659,16 +709,16 @@ export default function App() {
       }
 
       const user = {
-        name: rawData.name,
-        phone: rawData.phone,
-        address: rawData.address,
-        pincode: rawData.pincode,
-        email: rawData.email,
-        gender: rawData.gender,
-        dob: rawData.dob,
-        member_id: rawData.member_id || `M-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-        occupation: rawData.occupation,
-        notes: rawData.notes,
+        name,
+        phone,
+        address: String(rawData.address || ""),
+        pincode: String(rawData.pincode || ""),
+        email: String(rawData.email || ""),
+        gender: String(rawData.gender || ""),
+        dob: String(rawData.dob || ""),
+        member_id: String(rawData.member_id || "") || `M-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+        occupation: String(rawData.occupation || ""),
+        notes: String(rawData.notes || ""),
         subscription: subStr,
         expiry_date: expiry.toISOString(),
         created_at: new Date().toISOString()
@@ -691,10 +741,13 @@ export default function App() {
         });
       } else {
         console.log("Successfully added user:", data);
+        // Record Initial Fees
+        await recordTransaction('joining', total, user.phone, `Initial Enrollment: ${subStr}`);
+        
         Swal.fire({
           icon: 'success',
           title: 'Registration Successful',
-          html: `<div class="text-left"><p class="text-xs mb-2">Member <b>${user.name}</b> has been enrolled into the core registry.</p><p class="text-[10px] bg-slate-50 p-2 rounded border border-slate-100">Initial payment due: <b class="text-emerald-600">₹${total}</b></p></div>`,
+          html: `<div class="text-left"><p class="text-xs mb-2">Member <b>${user.name}</b> has been enrolled into the core registry.</p><p class="text-[10px] bg-slate-50 p-2 rounded border border-slate-100">Initial payment recorded: <b class="text-emerald-600">₹${total}</b></p></div>`,
           confirmButtonColor: '#10b981'
         });
         form.reset();
@@ -720,14 +773,27 @@ export default function App() {
     setGenMemberId(id);
   };
 
-  const deleteMember = async (id: string) => {
-    if (!confirm("Delete this member?")) return;
+  const deleteMember = async (id: string, name: string) => {
+    const result = await Swal.fire({
+      title: 'Revoke Membership?',
+      text: `Are you sure you want to permanently remove "${name}" from the registry? All circulation history will be orphaned.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#94a3b8',
+      confirmButtonText: 'Yes, Revoke Access'
+    });
+    
+    if (!result.isConfirmed) return;
+
     const { error } = await supabase.from("users").delete().eq("id", id);
-    if (error) alert(error.message);
-    else {
-      alert("Member deleted");
+    if (error) {
+      Swal.fire({ icon: 'error', title: 'Deletion Failed', text: error.message });
+    } else {
+      Swal.fire({ icon: 'success', title: 'Registry Updated', text: 'Member successfully removed.', timer: 1500 });
       loadMembers();
       loadDashboard();
+      if (viewUserModal && viewUserModal.id === id) setViewUserModal(null);
     }
   };
 
@@ -737,30 +803,66 @@ export default function App() {
     const formData = new FormData(form);
     const book = Object.fromEntries(formData.entries());
     const { error } = await supabase.from("books").insert([book]);
-    if (error) alert(error.message);
-    else {
-      alert("Book added");
+    if (error) {
+      Swal.fire({ icon: 'error', title: 'Registry Fault', text: error.message });
+    } else {
+      Swal.fire({ icon: 'success', title: 'Asset Indexed', text: 'New book record has been committed to the vault.', timer: 1500 });
       form.reset();
       loadDashboard();
     }
   };
 
-  const deleteBook = async (stock: string) => {
+  const deleteBook = async (input: any) => {
+    let book: any = null;
+    if (typeof input === 'string') {
+      const { data } = await supabase.from("books").select("*").eq("stocknumber", input).maybeSingle();
+      book = data;
+    } else {
+      book = input;
+    }
+
+    if (!book) return;
+
     const result = await Swal.fire({
-      title: 'Are you sure?',
-      text: "This action cannot be undone!",
+      title: 'Decommission Asset?',
+      text: `Are you sure you want to permanently remove "${book.title}" (Stock: ${book.stocknumber})? This action cannot be undone.`,
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonColor: '#3b82f6',
-      cancelButtonColor: '#ef4444',
-      confirmButtonText: 'Yes, delete it!'
+      confirmButtonText: 'CONFIRM DELETE',
+      confirmButtonColor: '#ef4444',
+      cancelButtonText: 'CANCEL',
+      background: '#ffffff',
+      customClass: {
+        title: 'text-lg font-black uppercase tracking-tight',
+        htmlContainer: 'text-xs text-slate-500 font-medium'
+      }
     });
-    if (!result.isConfirmed) return;
-    const { error } = await supabase.from("books").delete().eq("stocknumber", stock);
-    if (error) alert(error.message);
-    else {
-      alert("Book deleted");
-      searchBooks();
+
+    if (result.isConfirmed) {
+      if (book.status === 'issued') {
+        return Swal.fire({
+          icon: 'error',
+          title: 'Operation Denied',
+          text: 'This asset is currently in possession of a member. It must be returned to the inventory before decommissioning.',
+          confirmButtonColor: '#3b82f6'
+        });
+      }
+
+      const { error } = await supabase.from("books").delete().eq("stocknumber", book.stocknumber);
+      if (error) {
+        Swal.fire({ icon: 'error', title: 'Registry Error', text: error.message });
+      } else {
+        Swal.fire({ 
+          icon: 'success', 
+          title: 'Asset Purged', 
+          text: 'The book has been removed from the central inventory.',
+          timer: 2000,
+          showConfirmButton: false 
+        });
+        if (viewBookModal && viewBookModal.stocknumber === book.stocknumber) setViewBookModal(null);
+        searchBooks();
+        loadDashboard();
+      }
     }
   };
 
@@ -782,14 +884,14 @@ export default function App() {
     }
     
     // Check borrowing limit
-    const { data: userCurrentIssues, error: countError } = await supabase
+    const { count: userCurrentIssues, error: countError } = await supabase
       .from("issued_books")
       .select("*", { count: "exact", head: true })
       .eq("user_phone", selectedIssueUserPhone);
 
     if (countError) {
       console.error("Limit check error:", countError);
-    } else if (userCurrentIssues && userCurrentIssues >= borrowingLimit) {
+    } else if (userCurrentIssues !== null && userCurrentIssues >= borrowingLimit) {
       return Swal.fire({
         icon: 'error',
         title: 'Limit Exceeded!',
@@ -839,22 +941,30 @@ export default function App() {
     }
 
     const { error } = await supabase.from("issued_books").delete().eq("book_id", selectedReturnBook.book_id);
-    if (error) alert(error.message);
-    else {
+    if (error) {
+      Swal.fire({ icon: 'error', title: 'Return Interrupted', text: error.message });
+    } else {
       if (fine > 0) {
-        // Log the fine to the user's notes or just alert for now 
-        // In a real system, we'd have a fines table or user.fine_balance
-        Swal.fire({
+        const { isConfirmed } = await Swal.fire({
           icon: 'warning',
-          title: 'Asset Restored!',
-          html: `<p>Book returned successfully.</p><p class="text-error font-black mt-2">DUE FINE: ₹${fine}</p>`,
-          footer: '<span class="text-[9px] uppercase font-bold text-slate-400">Overdue Penalty applied to profile notes</span>'
+          title: 'Asset Restored with Fine',
+          html: `<p>Book returned successfully.</p><p class="text-error font-black mt-2 text-xl">FINE CALCULATED: ₹${fine}</p>`,
+          showCancelButton: true,
+          confirmButtonText: 'Record as Paid Now',
+          cancelButtonText: 'Add to Unpaid Dues',
+          confirmButtonColor: '#10b981',
+          footer: '<span class="text-[9px] uppercase font-bold text-slate-400">Overdue Penalty applied to profile notes if unpaid</span>'
         });
-        
-        // Update user notes with fine info
-        const { data: userData } = await supabase.from("users").select("notes").eq("phone", selectedReturnBook.user_phone).maybeSingle();
-        const updatedNotes = `${userData?.notes || ""}\n[UNPAID FINE: ₹${fine} (Ref: ${selectedReturnBook.stock_number} returned ${new Date().toLocaleDateString()})]`.trim();
-        await supabase.from("users").update({ notes: updatedNotes }).eq("phone", selectedReturnBook.user_phone);
+
+        if (isConfirmed) {
+          await recordTransaction('fine', fine, selectedReturnBook.user_phone, `Fine paid for stock #${selectedReturnBook.stock_number}`);
+          Swal.fire({ icon: 'success', title: 'Fine Cleared', timer: 1000, showConfirmButton: false });
+        } else {
+          // Update user notes with fine info
+          const { data: userData } = await supabase.from("users").select("notes").eq("phone", selectedReturnBook.user_phone).maybeSingle();
+          const updatedNotes = `${userData?.notes || ""}\n[UNPAID FINE: ₹${fine} (Ref: ${selectedReturnBook.stock_number} returned ${new Date().toLocaleDateString()})]`.trim();
+          await supabase.from("users").update({ notes: updatedNotes }).eq("phone", selectedReturnBook.user_phone);
+        }
       } else {
         Swal.fire({ icon: 'success', title: 'Returned!', timer: 1500, showConfirmButton: false });
       }
@@ -865,6 +975,7 @@ export default function App() {
       loadIssued();
       loadDashboard();
       loadMembers();
+      loadTransactions();
     }
   };
 
@@ -872,11 +983,16 @@ export default function App() {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
     const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
+    const rawData = Object.fromEntries(formData.entries());
+    const data: Record<string, string> = {};
+    Object.keys(rawData).forEach(key => {
+      data[key] = String(rawData[key]);
+    });
     const { error } = await supabase.from("books").update(data).eq("stocknumber", editBookModal.stocknumber);
-    if (error) alert(error.message);
-    else {
-      alert("Updated");
+    if (error) {
+      Swal.fire({ icon: 'error', title: 'Data Rejection', text: error.message });
+    } else {
+      Swal.fire({ icon: 'success', title: 'Registry Adjusted', text: 'Asset intelligence updated successfully.', timer: 1500 });
       setEditBookModal(null);
       searchBooks();
     }
@@ -1349,8 +1465,12 @@ export default function App() {
       }).eq("id", member.id);
 
       if (!error) {
-        Swal.fire("Renewed!", `Expiry extended to ${newExpiry.toLocaleDateString()}`, "success");
+        const amount = type === 'monthly' ? subsMonthlyFee * Number(duration) : subsYearlyFee * Number(duration);
+        await recordTransaction('subscription', amount, member.phone, `Subscription Renewal (${duration} units)`);
+        
+        Swal.fire("Renewed!", `Expiry extended to ${newExpiry.toLocaleDateString()}. Payment of ₹${amount} recorded.`, "success");
         loadMembers();
+        loadTransactions();
         if (viewUserModal && viewUserModal.id === member.id) {
           setViewUserModal({...viewUserModal, expiry_date: newExpiry.toISOString()});
         }
@@ -1407,7 +1527,8 @@ export default function App() {
     loadMembers();
     loadIssued();
     loadTodayAttendance();
-  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance]);
+    loadTransactions();
+  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions]);
 
   useEffect(() => {
     if (activeTab === "reports") loadReports();
@@ -1526,7 +1647,8 @@ export default function App() {
             {[
               { id: "circulation", label: "Issue Records", icon: "🛫" },
               { id: "return", label: "Return Books", icon: "🛬" },
-              { id: "issuedList", label: "Live Ledger", icon: "📋" }
+              { id: "issuedList", label: "Live Ledger", icon: "📋" },
+              { id: "financials", label: "Financial Core", icon: "💰" }
             ].map(tab => (
               <li
                 key={tab.id}
@@ -1546,6 +1668,7 @@ export default function App() {
           <ul className="list-none space-y-1 mb-6">
             {[
               { id: "engagement", label: "Member Hub", icon: "🔔" },
+              { id: "map", label: "Store Mapping", icon: "🗺️" },
               { id: "rules", label: "Rules & Policy", icon: "🛡️" },
               { id: "advanced", label: "Advanced Ops", icon: "⚙️" },
               { id: "reports", label: "Analytics", icon: "📈" },
@@ -1983,11 +2106,17 @@ export default function App() {
                         <tr>
                           <td colSpan={3} className="px-8 py-20 text-center">
                             <div className="flex flex-col items-center gap-4 opacity-30">
-                              <span className="text-6xl">📭</span>
+                              <span className="text-6xl animate-bounce duration-[3s]">📭</span>
                               <div>
-                                <p className="text-sm font-black text-slate-800 uppercase tracking-widest">No Records Found</p>
-                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter mt-1">Registry is currently void or filtered out</p>
+                                <p className="text-sm font-black text-slate-800 uppercase tracking-widest">Registry Vacuum Detected</p>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter mt-1">No profiles match the current filter parameters</p>
                               </div>
+                              <button 
+                                onClick={() => { setMemberSearch(""); setMemberFilterSub("all"); setMemberFilterDate(""); }}
+                                className="mt-4 px-6 py-2 bg-slate-900 text-white rounded-full text-[9px] font-black uppercase tracking-widest hover:scale-105 transition-all"
+                              >
+                                RESET FILTERS
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -2006,7 +2135,7 @@ export default function App() {
                                 {u.name?.[0].toUpperCase()}
                               </div>
                               <div className="text-left">
-                                <div className="font-black text-slate-800 group-hover:text-primary transition-colors text-base tracking-tight">{u.name}</div>
+                                <div className="font-black text-slate-800 group-hover:text-primary transition-colors text-base tracking-tight cursor-pointer" onClick={() => setViewUserModal(u)}>{u.name}</div>
                                 <div className="text-[11px] text-slate-400 font-mono tracking-widest mt-0.5">{u.phone}</div>
                               </div>
                             </div>
@@ -2015,8 +2144,8 @@ export default function App() {
                             <div className="flex items-center gap-3">
                               <div className="flex flex-col gap-1">
                                 <span className={`text-[9px] px-4 py-1.5 rounded-full font-black tracking-[0.2em] uppercase shadow-lg ${
-                                  u.subscription?.includes('LIFETIME') ? 'bg-gradient-to-r from-amber-600 to-amber-400 text-white shadow-amber-500/30' :
-                                  u.subscription?.includes('YEARLY') ? 'bg-gradient-to-r from-emerald-600 to-emerald-400 text-white shadow-emerald-500/30' :
+                                  (u.subscription || "").includes('LIFETIME') ? 'bg-gradient-to-r from-amber-600 to-amber-400 text-white shadow-amber-500/30' :
+                                  (u.subscription || "").includes('YEARLY') ? 'bg-gradient-to-r from-emerald-600 to-emerald-400 text-white shadow-emerald-500/30' :
                                   'bg-gradient-to-r from-primary to-slate-700 text-white shadow-primary/30'
                                 }`}>
                                   {u.subscription || "INACTIVE_SYSTEM"}
@@ -2058,13 +2187,13 @@ export default function App() {
                               </a>
                               <button 
                                 onClick={() => setEditMemberModal(u)} 
-                                className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all" 
+                                className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl hover:bg-primary/10 hover:border-primary/30 transition-all shadow-sm" 
                                 title="Update Sequence"
                               >
                                 ✏️
                               </button>
                               <button 
-                                onClick={() => deleteMember(u.id)} 
+                                onClick={() => deleteMember(u.id, u.name)} 
                                 className="w-10 h-10 flex items-center justify-center bg-red-50 border border-red-100 text-red-500 rounded-xl hover:bg-red-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" 
                                 title="Purge Record"
                               >
@@ -3005,6 +3134,150 @@ export default function App() {
           </div>
         )}
 
+        {/* FINANCIAL LEDGER */}
+        {activeTab === "financials" && (
+          <div className="flex flex-col gap-8 animate-in fade-in duration-500">
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+               <div className="bg-emerald-900 p-8 rounded-3xl text-white shadow-xl shadow-emerald-900/10 border-l-[8px] border-emerald-400">
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-60 mb-2">Institutional Revenue</p>
+                  <p className="text-4xl font-black tracking-tighter">₹{financialStats.total}</p>
+                  <p className="text-[9px] mt-4 font-bold uppercase tracking-widest bg-emerald-800/50 py-1 px-3 rounded-full inline-block">Sync Level: Gamma</p>
+               </div>
+               <div className="bg-slate-900 p-8 rounded-3xl text-white shadow-xl shadow-slate-900/10 border-l-[8px] border-blue-400">
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-60 mb-2">Subscription Volume</p>
+                  <p className="text-4xl font-black tracking-tighter">₹{financialStats.subs}</p>
+                  <div className="flex items-center gap-2 mt-4">
+                    <div className="h-1 flex-1 bg-white/10 rounded-full overflow-hidden">
+                       <div className="h-full bg-blue-400" style={{ width: `${(financialStats.subs/financialStats.total)*100}%` }}></div>
+                    </div>
+                    <span className="text-[10px] font-bold">{( (financialStats.subs / (financialStats.total || 1)) * 100 ).toFixed(0)}%</span>
+                  </div>
+               </div>
+               <div className="bg-slate-900 p-8 rounded-3xl text-white shadow-xl shadow-slate-900/10 border-l-[8px] border-amber-400">
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-60 mb-2">Penalty Recovery</p>
+                  <p className="text-4xl font-black tracking-tighter">₹{financialStats.fines}</p>
+                  <div className="flex items-center gap-2 mt-4">
+                    <div className="h-1 flex-1 bg-white/10 rounded-full overflow-hidden">
+                       <div className="h-full bg-amber-400" style={{ width: `${(financialStats.fines/financialStats.total)*100}%` }}></div>
+                    </div>
+                    <span className="text-[10px] font-bold">{( (financialStats.fines / (financialStats.total || 1)) * 100 ).toFixed(0)}%</span>
+                  </div>
+               </div>
+             </div>
+
+             <div className="section-card">
+               <div className="section-header flex justify-between items-center">
+                 <h2>Financial Circulation Log</h2>
+                 <button onClick={loadTransactions} className="text-xs font-black text-accent hover:underline uppercase tracking-widest">Force Audit Re-Sync</button>
+               </div>
+               <div className="overflow-x-auto">
+                 <table className="w-full">
+                   <thead>
+                     <tr>
+                       <th className="table-header">Timestamp</th>
+                       <th className="table-header">Member Identification</th>
+                       <th className="table-header">Class</th>
+                       <th className="table-header">Reference Notes</th>
+                       <th className="table-header text-right">Value</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-slate-50">
+                     {transactions.length === 0 ? (
+                       <tr><td colSpan={5} className="py-20 text-center text-slate-300 italic">No financial strata detected. Ensure "transactions" table is provisioned.</td></tr>
+                     ) : (
+                       transactions.map(t => (
+                         <tr key={t.id} className="hover:bg-slate-50">
+                           <td className="table-cell font-mono text-[10px] text-slate-400">
+                             {new Date(t.created_at).toLocaleString()}
+                           </td>
+                           <td className="table-cell">
+                             <div className="text-xs font-bold text-slate-800">{t.user_phone}</div>
+                           </td>
+                           <td className="table-cell">
+                             <span className={`text-[8px] px-2 py-0.5 rounded-full font-black uppercase ${
+                               t.type === 'fine' ? 'bg-amber-100 text-amber-600' : 
+                               t.type === 'joining' ? 'bg-blue-100 text-blue-600' : 'bg-emerald-100 text-emerald-600'
+                             }`}>
+                               {t.type}
+                             </span>
+                           </td>
+                           <td className="table-cell text-xs text-slate-500 font-medium italic">{t.notes}</td>
+                           <td className="table-cell text-right font-black text-slate-800">₹{t.amount}</td>
+                         </tr>
+                       ))
+                     )}
+                   </tbody>
+                 </table>
+               </div>
+             </div>
+          </div>
+        )}
+
+        {/* SHELF MAPPING */}
+        {activeTab === "map" && (
+          <div className="flex flex-col gap-8 animate-in fade-in duration-500">
+             <div className="section-card p-10 bg-slate-900 border-none relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-8 opacity-5">
+                   <span className="text-9xl font-black italic">MAP</span>
+                </div>
+                <div className="relative z-10 text-left">
+                  <h2 className="text-3xl font-black text-white tracking-tighter">Physical Asset Mapping</h2>
+                  <p className="text-[10px] text-white/40 uppercase tracking-[0.4em] mt-2">Spatial Distribution Analysis of Internal Inventory</p>
+                </div>
+             </div>
+
+             <div className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-6 gap-4">
+                {Array.from({ length: 30 }, (_, i) => {
+                  const shelfId = String(i + 1);
+                  const booksOnShelf = books.filter(b => String(b.shelfnumber) === shelfId);
+                  const capacity = 50; // Arbitrary safe limit for visual
+                  const percent = Math.min(Math.round((booksOnShelf.length / capacity) * 100), 100);
+
+                  return (
+                    <motion.div 
+                      key={shelfId}
+                      whileHover={{ scale: 1.02, y: -4 }}
+                      className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl transition-all cursor-pointer group"
+                      onClick={() => {
+                        setBookSearch(shelfId);
+                        setSearchType("shelfnumber");
+                        setActiveTab("books");
+                      }}
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <span className="text-[10px] font-black text-slate-400 group-hover:text-primary transition-colors">SHELF #{shelfId}</span>
+                        <span className="text-xs">📂</span>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-end">
+                           <p className="text-2xl font-black tracking-tighter text-slate-800 tabular-nums">{booksOnShelf.length}</p>
+                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{percent}% FULL</p>
+                        </div>
+                        <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden">
+                           <div 
+                             className={`h-full transition-all duration-1000 ${percent > 90 ? 'bg-red-500' : percent > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`} 
+                             style={{ width: `${percent}%` }}
+                           ></div>
+                        </div>
+                        <p className="text-[8px] text-slate-400 font-medium italic group-hover:text-slate-600 transition-colors uppercase tracking-tighter">
+                          {booksOnShelf.length > 0 ? "Inspect Assets →" : "Available Space"}
+                        </p>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+             </div>
+
+             <div className="section-card p-12 text-center border-dashed border-2 border-slate-200 bg-transparent flex flex-col items-center gap-4">
+                <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center text-3xl">🏗️</div>
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Section Planning Engine</h3>
+                <p className="text-xs text-text-muted max-w-sm font-medium leading-relaxed italic">
+                  Select a shelf instance to view localized inventory or perform a mass-transfer sequence. Future updates will include 3D spatial orientation.
+                </p>
+             </div>
+          </div>
+        )}
+
         {/* ISSUED LIST */}
         {activeTab === "issuedList" && (
           <div className="section-card">
@@ -3526,6 +3799,13 @@ export default function App() {
               </div>
 
               <div className="flex gap-3">
+                <button 
+                  onClick={() => deleteBook(viewBookModal)}
+                  className="p-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 transition-all font-mono group"
+                  title="Decommission Asset"
+                >
+                  <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
+                </button>
                 <button 
                   onClick={() => setViewBookModal(null)}
                   className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all font-mono"
