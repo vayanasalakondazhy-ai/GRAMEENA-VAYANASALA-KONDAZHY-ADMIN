@@ -194,6 +194,26 @@ export default function App() {
       console.warn("Transaction persistence failed:", e);
     }
   };
+
+  const loadUserHistory = useCallback(async (phone: string) => {
+    setHistoryLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("borrowing_history")
+        .select("*")
+        .eq("user_phone", phone)
+        .order("return_date", { ascending: false });
+      
+      if (!error) {
+        setUserHistory(data || []);
+      }
+    } catch (e) {
+      console.error("History fetch error:", e);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
   const [issueSearchVal, setIssueSearchVal] = useState("");
   const [foundIssueBooks, setFoundIssueBooks] = useState<any[]>([]);
   const [selectedIssueBook, setSelectedIssueBook] = useState<any>(null);
@@ -207,6 +227,8 @@ export default function App() {
   });
   const [passwordInput, setPasswordInput] = useState("");
   const [isManglishEnabled, setIsManglishEnabled] = useState(false);
+  const [userHistory, setUserHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [focusedInput, setFocusedInput] = useState<HTMLInputElement | null>(null);
   const [showVirtualKeyboard, setShowVirtualKeyboard] = useState(false);
   const [activeKbTab, setActiveKbTab] = useState<'vowels' | 'consonants' | 'conjuncts' | 'extras'>('vowels');
@@ -939,6 +961,18 @@ export default function App() {
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       fine = diffDays * fineAmount;
     }
+
+    // ARCHIVE TO HISTORY BEFORE DELETE
+    const historyEntry = {
+      book_title: selectedReturnBook.book?.title || "Unknown Asset",
+      stock_number: selectedReturnBook.stock_number,
+      user_phone: selectedReturnBook.user_phone,
+      issue_date: selectedReturnBook.issue_date,
+      return_date: new Date().toISOString(),
+      status: 'returned'
+    };
+    
+    await supabase.from("borrowing_history").insert([historyEntry]);
 
     const { error } = await supabase.from("issued_books").delete().eq("book_id", selectedReturnBook.book_id);
     if (error) {
@@ -2135,7 +2169,7 @@ export default function App() {
                                 {u.name?.[0].toUpperCase()}
                               </div>
                               <div className="text-left">
-                                <div className="font-black text-slate-800 group-hover:text-primary transition-colors text-base tracking-tight cursor-pointer" onClick={() => setViewUserModal(u)}>{u.name}</div>
+                                <div className="font-black text-slate-800 group-hover:text-primary transition-colors text-base tracking-tight cursor-pointer" onClick={() => { setViewUserModal(u); loadUserHistory(u.phone); }}>{u.name}</div>
                                 <div className="text-[11px] text-slate-400 font-mono tracking-widest mt-0.5">{u.phone}</div>
                               </div>
                             </div>
@@ -2163,7 +2197,7 @@ export default function App() {
                           <td className="px-8 py-6">
                             <div className="flex justify-end gap-3 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 translate-x-4 transition-all pr-4">
                               <button 
-                                onClick={() => setViewUserModal(u)} 
+                                onClick={() => { setViewUserModal(u); loadUserHistory(u.phone); }} 
                                 className="w-10 h-10 flex items-center justify-center bg-blue-50 border border-blue-100 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" 
                                 title="Comprehensive Intel"
                               >
@@ -2864,7 +2898,7 @@ export default function App() {
                       </td>
                       <td className="table-cell text-right">
                         <button 
-                          onClick={() => setViewUserModal(m)}
+                          onClick={() => { setViewUserModal(m); loadUserHistory(m.phone); }}
                           className="text-primary font-black text-[10px] tracking-widest uppercase hover:underline"
                         >
                           View Borrowing History
@@ -3303,7 +3337,7 @@ export default function App() {
                         <div className="font-bold text-slate-800">{d.book?.title}</div>
                       </td>
                       <td className="table-cell">
-                        <button onClick={() => setViewUserModal(d.user)} className="text-accent font-bold hover:underline underline-offset-4">{d.user?.name || d.user_phone}</button>
+                        <button onClick={() => { setViewUserModal(d.user); loadUserHistory(d.user_phone); }} className="text-accent font-bold hover:underline underline-offset-4">{d.user?.name || d.user_phone}</button>
                       </td>
                       <td className="table-cell font-mono text-xs font-bold text-text-muted">{d.due_date?.split("T")[0]}</td>
                       <td className="table-cell text-error font-black">₹{d.fine}</td>
@@ -3730,6 +3764,32 @@ export default function App() {
                     </span>
                   </div>
                 ))}
+              </div>
+
+              <h4 className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-2 flex items-center gap-2 pt-4">
+                <span>Reading Journey (History)</span>
+                <span className="flex-1 h-px bg-slate-100"></span>
+              </h4>
+
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 pb-4">
+                {historyLoading ? (
+                  <div className="text-center py-4 text-slate-300 text-[10px] animate-pulse">Syncing chronological records...</div>
+                ) : userHistory.length === 0 ? (
+                  <div className="text-center py-4 text-slate-300 italic text-[11px]">New member profile. No archived history found.</div>
+                ) : (
+                  userHistory.map((h, i) => (
+                    <div key={i} className="bg-amber-50/30 p-3 rounded-lg border border-amber-100 flex justify-between items-start">
+                      <div>
+                        <p className="text-xs font-bold text-slate-800">{h.book_title}</p>
+                        <p className="text-[8px] text-slate-400 font-bold uppercase tracking-tight">Stock: {h.stock_number}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[9px] font-mono font-bold text-emerald-600">{new Date(h.return_date).toLocaleDateString()}</p>
+                        <p className="text-[7px] text-slate-400 font-bold uppercase tracking-tighter">Returned</p>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
 
               <button onClick={() => setViewUserModal(null)} className="w-full btn-primary py-4 mt-6 uppercase font-black text-[10px] tracking-widest shadow-lg shadow-primary/20">Close Institutional Profile</button>
