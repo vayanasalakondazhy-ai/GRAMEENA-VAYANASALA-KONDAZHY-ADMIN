@@ -1328,6 +1328,7 @@ export default function App() {
       dob: rawData.dob,
       member_id: rawData.member_id,
       occupation: rawData.occupation,
+      age: rawData.age,
       notes: rawData.notes,
       subscription: subStr,
       expiry_date: expiry.toISOString()
@@ -4197,7 +4198,10 @@ export default function App() {
               </select>
               <input name="dob" defaultValue={editMemberModal.dob} type="date" className="input-field" />
               <input name="member_id" defaultValue={editMemberModal.member_id} placeholder="Membership ID" className="input-field" />
-              <input name="occupation" defaultValue={editMemberModal.occupation} placeholder="Occupation" className="input-field" />
+              <div className="grid grid-cols-2 gap-4">
+                <input name="occupation" defaultValue={editMemberModal.occupation} placeholder="Occupation" className="input-field" />
+                <input name="age" defaultValue={editMemberModal.age} placeholder="Age" className="input-field" />
+              </div>
               
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-3">
                 <p className="text-[9px] font-black uppercase tracking-widest text-primary">Update Subscription</p>
@@ -4265,6 +4269,7 @@ export default function App() {
                   { label: "Membership ID", val: viewUserModal.member_id },
                   { label: "Email", val: viewUserModal.email },
                   { label: "Occupation", val: viewUserModal.occupation },
+                  { label: "Age", val: viewUserModal.age },
                   { label: "Date of Birth", val: viewUserModal.dob },
                   { label: "Gender", val: viewUserModal.gender },
                   { label: "Pincode", val: viewUserModal.pincode },
