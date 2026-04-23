@@ -1325,7 +1325,7 @@ export default function App() {
       pincode: rawData.pincode,
       email: rawData.email,
       gender: rawData.gender,
-      dob: rawData.dob,
+      dob: rawData.dob || null,
       member_id: rawData.member_id,
       occupation: rawData.occupation,
       age: rawData.age,
@@ -2098,7 +2098,7 @@ export default function App() {
           <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Engagement & Ops</div>
           <ul className="list-none space-y-1 mb-6">
             {[
-              { id: "engagement", label: "Member Hub", icon: "🔔" },
+              { id: "engagement", label: "Engagement Hub", icon: "🔔" },
               { id: "map", label: "Store Mapping", icon: "🗺️" },
               { id: "settings", label: t('config'), icon: "⚙️" },
               { id: "reports", label: t('reports'), icon: "📈" },
@@ -2353,7 +2353,7 @@ export default function App() {
                         <input name="phone" placeholder="+91 XXXX..." required className="input-field py-4 bg-slate-50/50 focus:bg-white" />
                       </div>
                       <div className="group text-left">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">DATE OF BIRTH</label>
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">DATE OF BIRTH (Optional)</label>
                         <input name="dob" type="date" className="input-field py-4 bg-slate-50/50 focus:bg-white" />
                       </div>
                     </div>
@@ -4196,7 +4196,10 @@ export default function App() {
                 <option value="Female">FEMALE</option>
                 <option value="Others">OTHERS</option>
               </select>
-              <input name="dob" defaultValue={editMemberModal.dob} type="date" className="input-field" />
+              <div className="group text-left">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Date of Birth (Optional)</label>
+                <input name="dob" defaultValue={editMemberModal.dob} type="date" className="input-field" />
+              </div>
               <input name="member_id" defaultValue={editMemberModal.member_id} placeholder="Membership ID" className="input-field" />
               <div className="grid grid-cols-2 gap-4">
                 <input name="occupation" defaultValue={editMemberModal.occupation} placeholder="Occupation" className="input-field" />
