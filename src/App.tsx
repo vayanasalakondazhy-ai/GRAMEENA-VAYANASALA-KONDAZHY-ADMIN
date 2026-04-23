@@ -90,6 +90,7 @@ export default function App() {
   const [editMemberModal, setEditMemberModal] = useState<any>(null);
   const [viewUserModal, setViewUserModal] = useState<any>(null);
   const [viewBookModal, setViewBookModal] = useState<any>(null);
+  const [showIdCard, setShowIdCard] = useState<any>(null);
   const [genMemberId, setGenMemberId] = useState("");
   const [borrowingLimit, setBorrowingLimit] = useState(3);
   const [fineAmount, setFineAmount] = useState(1); // Default 1 currency unit per day
@@ -106,6 +107,71 @@ export default function App() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResults, setLookupResults] = useState<any[]>([]);
   const [scannedBook, setScannedBook] = useState<any>(null);
+  const [lang, setLang] = useState<"en" | "ml">("en");
+
+  // Translation Dictionary
+  const translations = {
+    en: {
+      dashboard: "Dashboard",
+      members: "Member Hub",
+      books: "Vault Registry",
+      circulation: "Circulation",
+      attendance: "Attendance",
+      reports: "Intelligence",
+      finance: "Ledger",
+      config: "Library Config",
+      welcome: "Welcome back, Admin.",
+      totalBooks: "TOTAL ASSETS",
+      totalMembers: "REGISTRY SIZE",
+      activeIssues: "IN CIRCULATION",
+      summary: "Operational Overview",
+      addMember: "Enroll Member",
+      addBook: "Index Asset",
+      search: "Search...",
+      issue: "Issue Asset",
+      return: "Return Asset",
+      expired: "Expired",
+      active: "Active",
+      total: "Total",
+      balance: "Net Balance",
+      fines: "Fines Collected",
+      subs: "Subs Revenue",
+      lastAudit: "Recent Audit Logs",
+      portalSubtitle: "GRAMEENA VAYANASALA KONDAZHY",
+      logout: "Deauthorize Session"
+    },
+    ml: {
+      dashboard: "ഡാഷ്‌ബോർഡ്",
+      members: "അംഗങ്ങൾ",
+      books: "പുസ്തകങ്ങൾ",
+      circulation: "വിതരണം",
+      attendance: "ഹാജർ പട്ടിക",
+      reports: "റിപ്പോർട്ടുകൾ",
+      finance: "സാമ്പത്തികം",
+      config: "ക്രമീകരണങ്ങൾ",
+      welcome: "സ്വാഗതം, അഡ്മിൻ.",
+      totalBooks: "ആകെ പുസ്തകങ്ങൾ",
+      totalMembers: "ആകെ അംഗങ്ങൾ",
+      activeIssues: "വിതരണം ചെയ്തവ",
+      summary: "പ്രവർത്തന അവലോകനം",
+      addMember: "അംഗത്തെ ചേർക്കുക",
+      addBook: "പുസ്തകം ചേർക്കുക",
+      search: "തിരയുക...",
+      issue: "പുസ്തകം നൽകുക",
+      return: "പുസ്തകം തിരിച്ചെടുക്കുക",
+      expired: "അവധി കഴിഞ്ഞു",
+      active: "സജീവം",
+      total: "ആകെ",
+      balance: "ബാക്കി തുക",
+      fines: "പിഴ തുക",
+      subs: "വരിസംഖ്യ",
+      lastAudit: "സമീപകാല പ്രവർത്തനങ്ങൾ",
+      portalSubtitle: "ഗ്രാമീണ വായനശാല കൊണ്ടഴി",
+      logout: "ലോഗ് ഔട്ട്"
+    }
+  };
+
+  const t = (key: keyof typeof translations['en']) => translations[lang][key] || key;
   const [showCamera, setShowCamera] = useState(false);
   const [cameras, setCameras] = useState<any[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>("");
@@ -1080,6 +1146,10 @@ export default function App() {
     }
   };
 
+  const printIdCard = () => {
+    window.print();
+  };
+
   const updateBook = async (e: FormEvent) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
@@ -1777,24 +1847,24 @@ export default function App() {
     <div className="flex bg-surface-bg min-h-screen text-text-main font-sans">
       {/* Sidebar Navigation */}
       <aside className="w-[240px] bg-primary text-white flex flex-col fixed h-full z-20 shadow-xl overflow-y-auto">
-        <div className="p-6 pb-4 flex items-center gap-3">
-          <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center">
+        <div className="p-6 pb-4 flex items-center gap-3 text-left">
+          <div className="w-8 h-8 bg-accent rounded-lg flex items-center justify-center shrink-0">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M4 6h18v2H4V6zm0 5h18v2H4v-2zm0 5h18v2H4v-2z"/></svg>
           </div>
-          <span className="text-xl font-bold tracking-tight">ADMINISTRATOR</span>
+          <span className="text-xl font-bold tracking-tight uppercase leading-tight line-clamp-2">Vayanashala Admin</span>
         </div>
-        <div className="px-6 mb-6">
+        <div className="px-6 mb-6 text-left">
           <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest leading-none">Management Console</p>
         </div>
         
-        <nav className="flex-1">
+        <nav className="flex-1 text-left">
           <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Main Modules</div>
           <ul className="list-none space-y-1 mb-6">
             {[
-              { id: "dashboard", label: "Dashboard", icon: "📊" },
-              { id: "members", label: "Members Registry", icon: "👤" },
-              { id: "books", label: "Books Inventory", icon: "📚" },
-              { id: "addBook", label: "Add Asset", icon: "➕" }
+              { id: "dashboard", label: t('dashboard'), icon: "📊" },
+              { id: "members", label: t('members'), icon: "👤" },
+              { id: "books", label: t('books'), icon: "📚" },
+              { id: "addBook", label: t('addBook'), icon: "➕" }
             ].map(tab => (
               <li
                 key={tab.id}
@@ -1813,10 +1883,10 @@ export default function App() {
           <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Circulation</div>
           <ul className="list-none space-y-1 mb-6">
             {[
-              { id: "circulation", label: "Issue Records", icon: "🛫" },
-              { id: "return", label: "Return Books", icon: "🛬" },
+              { id: "circulation", label: t('issue'), icon: "🛫" },
+              { id: "return", label: t('return'), icon: "🛬" },
               { id: "issuedList", label: "Live Ledger", icon: "📋" },
-              { id: "financials", label: "Financial Core", icon: "💰" }
+              { id: "financials", label: t('finance'), icon: "💰" }
             ].map(tab => (
               <li
                 key={tab.id}
@@ -1837,9 +1907,9 @@ export default function App() {
             {[
               { id: "engagement", label: "Member Hub", icon: "🔔" },
               { id: "map", label: "Store Mapping", icon: "🗺️" },
-              { id: "settings", label: "Library Config", icon: "⚙️" },
-              { id: "reports", label: "Analytics", icon: "📈" },
-              { id: "attendance", label: "Gate Logs", icon: "🕒" }
+              { id: "settings", label: t('config'), icon: "⚙️" },
+              { id: "reports", label: t('reports'), icon: "📈" },
+              { id: "attendance", label: t('attendance'), icon: "🕒" }
             ].map(tab => (
               <li
                 key={tab.id}
@@ -1859,7 +1929,7 @@ export default function App() {
               onClick={handleLogout}
               className="px-6 py-2.5 text-sm cursor-pointer transition-all flex items-center gap-3 border-r-4 text-slate-400 border-transparent hover:text-red-400 hover:bg-red-500/5 group"
             >
-              <span className="group-hover:scale-110 transition-transform">🚪</span> Sign Out
+              <span className="group-hover:scale-110 transition-transform">🚪</span> {t('logout')}
             </li>
           </ul>
         </nav>
@@ -1877,56 +1947,72 @@ export default function App() {
             <div className="flex items-center gap-5">
               <motion.div 
                 whileHover={{ rotate: 15, scale: 1.1 }}
-                className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center text-white text-2xl shadow-xl shadow-primary/20"
+                className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center text-white text-2xl shadow-xl shadow-primary/20 shrink-0"
               >
                 🏛️
               </motion.div>
-              <div>
-                <h1 className="text-2xl font-black text-primary tracking-tighter leading-none mb-1">GRAMEENA VAYANASALA KONDAZHY</h1>
+              <div className="text-left">
+                <h1 className="text-2xl font-black text-primary tracking-tighter leading-none mb-1">{lang === 'ml' ? translations.ml.portalSubtitle : translations.en.portalSubtitle}</h1>
                 <p className="text-[10px] text-text-muted font-black uppercase tracking-[0.2em] flex items-center gap-2">
                   <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-500">REG NO: 1231</span>
                   <span className="w-1.5 h-1.5 bg-slate-200 rounded-full"></span>
-                  <span className="opacity-60">Established Excellence</span>
+                  <span className="opacity-60">{t('welcome')}</span>
                 </p>
               </div>
             </div>
-            <div className="flex flex-col items-end">
-               <div 
-                onClick={() => {
-                  if (dbStatus === 'error') {
-                    Swal.fire({
-                      title: 'Database Connectivity Intel',
-                      text: dbError || 'Unknown connection fault.',
-                      icon: 'warning',
-                      confirmButtonColor: '#3b82f6',
-                      footer: '<p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center">Troubleshoot: Verify Secret Keys in AI Studio Settings.</p>'
-                    });
-                  }
-                }}
-                className={`db-status flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-black tracking-widest mb-2 transition-all ${
-                  dbStatus === 'connected' ? 'bg-emerald-50 text-emerald-700 border-emerald-100 cursor-help' : 
-                  dbStatus === 'checking' ? 'bg-amber-50 text-amber-700 border-amber-100 cursor-wait' :
-                  'bg-red-50 text-red-700 border-red-100 cursor-pointer animate-pulse hover:bg-red-100'
-                }`}
-                title={dbError || (dbStatus === 'connected' ? 'Sync Active' : 'Establishing Link...')}
-              >
-                <span className={`w-2 h-2 rounded-full animate-pulse ${
-                  dbStatus === 'connected' ? 'bg-emerald-500' : 
-                  dbStatus === 'checking' ? 'bg-amber-500' :
-                  'bg-red-500'
-                }`}></span>
-                {dbStatus === 'connected' ? 'SUPABASE: ONLINE' : 
-                 dbStatus === 'checking' ? 'SUPABASE: SYNCING' :
-                 'SUPABASE: OFFLINE'}
-              </div>
-              <div className="flex items-center gap-3">
-                <p className="text-2xl font-black text-slate-800 tracking-tighter tabular-nums font-mono">
-                  {currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })}
-                </p>
-                <div className="h-4 w-[2px] bg-slate-200 rounded-full"></div>
-                <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest pt-0.5">
-                  {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-                </p>
+            <div className="flex items-center gap-6">
+               <div className="flex bg-slate-100 p-1 rounded-xl">
+                 <button 
+                  onClick={() => setLang('en')}
+                  className={`px-3 py-1 rounded-lg text-[9px] font-black tracking-widest transition-all ${lang === 'en' ? 'bg-white text-primary shadow-sm' : 'text-slate-400'}`}
+                 >
+                   ENG
+                 </button>
+                 <button 
+                  onClick={() => setLang('ml')}
+                  className={`px-3 py-1 rounded-lg text-[9px] font-black tracking-widest transition-all ${lang === 'ml' ? 'bg-white text-primary shadow-sm' : 'text-slate-400'}`}
+                 >
+                   മലയ
+                 </button>
+               </div>
+               <div className="flex flex-col items-end">
+                  <div 
+                  onClick={() => {
+                    if (dbStatus === 'error') {
+                      Swal.fire({
+                        title: 'Database Connectivity Intel',
+                        text: dbError || 'Unknown connection fault.',
+                        icon: 'warning',
+                        confirmButtonColor: '#3b82f6',
+                        footer: '<p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center">Troubleshoot: Verify Secret Keys in AI Studio Settings.</p>'
+                      });
+                    }
+                  }}
+                  className={`db-status flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-black tracking-widest mb-2 transition-all ${
+                    dbStatus === 'connected' ? 'bg-emerald-50 text-emerald-700 border-emerald-100 cursor-help' : 
+                    dbStatus === 'checking' ? 'bg-amber-50 text-amber-700 border-amber-100 cursor-wait' :
+                    'bg-red-50 text-red-700 border-red-100 cursor-pointer animate-pulse hover:bg-red-100'
+                  }`}
+                  title={dbError || (dbStatus === 'connected' ? 'Sync Active' : 'Establishing Link...')}
+                >
+                  <span className={`w-2 h-2 rounded-full animate-pulse ${
+                    dbStatus === 'connected' ? 'bg-emerald-500' : 
+                    dbStatus === 'checking' ? 'bg-amber-500' :
+                    'bg-red-500'
+                  }`}></span>
+                  {dbStatus === 'connected' ? 'SUPABASE: ONLINE' : 
+                  dbStatus === 'checking' ? 'SUPABASE: SYNCING' :
+                  'SUPABASE: OFFLINE'}
+                </div>
+                <div className="flex items-center gap-3">
+                  <p className="text-2xl font-black text-slate-800 tracking-tighter tabular-nums font-mono">
+                    {currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })}
+                  </p>
+                  <div className="h-4 w-[2px] bg-slate-200 rounded-full"></div>
+                  <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest pt-0.5">
+                    {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                  </p>
+                </div>
               </div>
             </div>
           </header>
@@ -1945,9 +2031,9 @@ export default function App() {
                 <div className="flex flex-col gap-8">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     {[
-                      { label: "Inventory Assets", value: counts.books, color: "text-slate-900", icon: "📚", bg: "bg-white" },
-                      { label: "Active Members", value: counts.users, color: "text-accent", icon: "👤", bg: "bg-white" },
-                      { label: "Current Loans", value: counts.issued, color: "text-amber-600", icon: "🛫", bg: "bg-white" }
+                      { label: t('totalBooks'), value: counts.books, color: "text-slate-900", icon: "📚", bg: "bg-white" },
+                      { label: t('totalMembers'), value: counts.users, color: "text-accent", icon: "👤", bg: "bg-white" },
+                      { label: t('activeIssues'), value: counts.issued, color: "text-amber-600", icon: "🛫", bg: "bg-white" }
                     ].map((stat, i) => (
                       <motion.div 
                         key={i} 
@@ -1955,13 +2041,13 @@ export default function App() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.1 }}
                         whileHover={{ y: -5 }}
-                        className={`${stat.bg} p-8 rounded-[32px] border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col justify-between group hover:border-accent/30 transition-all`}
+                        className={`${stat.bg} p-8 rounded-[32px] border border-slate-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col justify-between group hover:border-accent/30 transition-all text-left`}
                       >
                         <div className="flex justify-between items-start mb-6">
                           <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 group-hover:text-accent transition-colors">{stat.label}</p>
                           <span className="text-2xl grayscale group-hover:grayscale-0 transition-all transform group-hover:scale-125 rotate-0 group-hover:-rotate-12">{stat.icon}</span>
                         </div>
-                        <p className={`text-5xl font-black tracking-tighter ${stat.color} mb-1 font-display`}>{stat.value}</p>
+                        <p className={`text-5xl font-black tracking-tighter ${stat.color} mb-1 font-display leading-tight`}>{stat.value}</p>
                         <div className="h-1 w-12 bg-slate-100 rounded-full group-hover:w-full group-hover:bg-accent/20 transition-all duration-500"></div>
                       </motion.div>
                     ))}
@@ -1971,10 +2057,10 @@ export default function App() {
                     <motion.div 
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className="section-card p-8 bg-white/40 backdrop-blur-md border-dashed border-2 hover:border-emerald-500/30 group"
+                      className="section-card p-8 bg-white/40 backdrop-blur-md border-dashed border-2 hover:border-emerald-500/30 group text-left"
                     >
                       <div className="flex items-center gap-4 mb-6">
-                        <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-2xl group-hover:rotate-[360deg] transition-transform duration-700">⚡</div>
+                        <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-2xl group-hover:rotate-[360deg] transition-transform duration-700 shrink-0">⚡</div>
                         <div>
                           <h3 className="text-base font-black text-slate-800 uppercase tracking-tight">System Integrity</h3>
                           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Postgres Protocol: Operational</p>
@@ -1996,10 +2082,10 @@ export default function App() {
                     <motion.div 
                       initial={{ opacity: 0, x: 20 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className="section-card p-8 bg-white/40 backdrop-blur-md border-dashed border-2 hover:border-blue-500/30 group"
+                      className="section-card p-8 bg-white/40 backdrop-blur-md border-dashed border-2 hover:border-blue-500/30 group text-left"
                     >
                       <div className="flex items-center gap-4 mb-6">
-                        <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center text-2xl group-hover:animate-bounce">💡</div>
+                        <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center text-2xl group-hover:animate-bounce shrink-0">💡</div>
                         <div>
                           <h3 className="text-base font-black text-slate-800 uppercase tracking-tight">Administrative Intelligence</h3>
                           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Actionable Insights Generated</p>
@@ -2329,6 +2415,13 @@ export default function App() {
                           </td>
                           <td className="px-8 py-6">
                             <div className="flex justify-end gap-3 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 translate-x-4 transition-all pr-4">
+                              <button 
+                                onClick={() => setShowIdCard(u)} 
+                                className="w-10 h-10 flex items-center justify-center bg-blue-50 border border-blue-100 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" 
+                                title="Generate ID Card"
+                              >
+                                🆔
+                              </button>
                               <button 
                                 onClick={() => { setViewUserModal(u); loadUserHistory(u.phone); }} 
                                 className="w-10 h-10 flex items-center justify-center bg-blue-50 border border-blue-100 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" 
@@ -4140,7 +4233,7 @@ export default function App() {
 
               <div className="flex gap-3">
                 <button 
-                  onClick={() => deleteBook(viewBookModal)}
+                  onClick={() => deleteBook(viewBookModal.stocknumber)}
                   className="p-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 transition-all font-mono group"
                   title="Decommission Asset"
                 >
@@ -4166,6 +4259,106 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ID CARD MODAL */}
+      <AnimatePresence>
+        {showIdCard && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-md p-4 print:p-0 print:bg-white"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-white rounded-[40px] shadow-2xl max-w-sm w-full overflow-hidden border border-slate-200 print:shadow-none print:border-none print:m-0"
+            >
+              <div className="id-card-content p-0 relative overflow-hidden" id="printable-id-card">
+                {/* Card Header */}
+                <div className="bg-primary p-6 text-center relative">
+                  <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
+                  <div className="relative z-10">
+                    <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center mx-auto mb-3 border border-white/20 text-2xl">
+                      🏛️
+                    </div>
+                    <h2 className="text-white font-black text-[10px] uppercase tracking-[0.2em] leading-tight">
+                      {lang === 'ml' ? translations.ml.portalSubtitle : translations.en.portalSubtitle}
+                    </h2>
+                    <p className="text-[8px] text-white/50 font-bold uppercase tracking-[0.3em] mt-1">Institutional Digital Registry</p>
+                  </div>
+                </div>
+
+                {/* Card Body */}
+                <div className="p-8 pt-10 flex flex-col items-center text-center relative">
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                     <div className="w-24 h-24 bg-white rounded-full p-1.5 shadow-xl border border-slate-100">
+                        <div className="w-full h-full bg-slate-100 rounded-full flex items-center justify-center text-3xl overflow-hidden text-slate-400">
+                          👤
+                        </div>
+                     </div>
+                  </div>
+
+                  <div className="mt-8 mb-6 text-left w-full pl-4 border-l-4 border-accent">
+                    <h3 className="text-xl font-black text-slate-800 tracking-tight leading-none mb-1 uppercase italic">{showIdCard.name}</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{showIdCard.occupation || "Permanent Member"}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 w-full mb-8">
+                     <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-left">
+                        <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1">MEMBER_ID</p>
+                        <p className="text-xs font-black text-slate-800 tracking-tighter tabular-nums">{showIdCard.member_id}</p>
+                     </div>
+                     <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-left">
+                        <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest mb-1">REGISTRY_EST</p>
+                        <p className="text-xs font-black text-slate-800 tracking-tighter">{new Date(showIdCard.created_at || Date.now()).getFullYear()}</p>
+                     </div>
+                  </div>
+
+                  <div className="w-full h-16 bg-white border-2 border-slate-100 rounded-2xl relative flex items-center justify-center overflow-hidden mb-6 group">
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="grid grid-cols-10 gap-1 opacity-20">
+                        {Array.from({length: 50}).map((_, i) => (
+                          <div key={i} className={`w-1.5 h-1.5 rounded-sm ${Math.random() > 0.5 ? 'bg-slate-800' : 'bg-slate-100'}`}></div>
+                        ))}
+                      </div>
+                      <p className="absolute text-[7px] font-black text-slate-400 uppercase tracking-[0.4em] font-mono">ENCRYPTED_SIGNATURE_NODE</p>
+                    </div>
+                  </div>
+
+                  <div className="w-full pt-6 border-t border-slate-100 flex justify-between items-center px-4">
+                    <div className="text-left">
+                      <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest mb-0.5">Authorization</p>
+                      <p className="text-[10px] font-black text-primary uppercase">Chief Librarian</p>
+                    </div>
+                    <div className="h-10 w-24 bg-slate-200/20 rounded-lg flex items-center justify-center italic text-[9px] text-slate-400 border border-dashed border-slate-200">
+                      Signature Not Required
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card Footer Decor */}
+                <div className="bg-slate-900 h-2 w-full"></div>
+              </div>
+
+              <div className="p-6 bg-slate-50 flex gap-4 print:hidden">
+                <button 
+                  onClick={() => setShowIdCard(null)}
+                  className="flex-1 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-800 transition-colors"
+                >
+                  Close
+                </button>
+                <button 
+                  onClick={printIdCard}
+                  className="flex-[2] py-3 bg-primary text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-105 transition-all"
+                >
+                  🖨️ Print Member Card
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
