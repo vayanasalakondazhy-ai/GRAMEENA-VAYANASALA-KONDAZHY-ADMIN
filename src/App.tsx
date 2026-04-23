@@ -923,6 +923,7 @@ export default function App() {
         dob: String(rawData.dob || ""),
         member_id: String(rawData.member_id || "") || `M-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
         occupation: String(rawData.occupation || ""),
+        age: String(rawData.age || ""),
         notes: String(rawData.notes || ""),
         subscription: subStr,
         expiry_date: expiry.toISOString(),
@@ -1034,17 +1035,18 @@ export default function App() {
             const joiningDateRaw = row['DATE OF JOINING'] || row['Joining Date'] || row['created_at'];
             const joiningDate = joiningDateRaw ? new Date(joiningDateRaw).toISOString() : new Date().toISOString();
             
-            // Age, Deposit, Remarks in notes
-            const age = row['AGE'] || "";
-            const deposit = row['DEPOSIT AMOUNT'] || "";
-            const remarks = row['REMARKS'] || "";
-            const notes = `AGE: ${age} | DEPOSIT: ${deposit} | REMARKS: ${remarks}`.trim();
+            // Age, Deposit, Remarks
+            const age = row['AGE'] || row['age'] || "";
+            const deposit = row['DEPOSIT AMOUNT'] || row['deposit'] || "";
+            const remarks = row['REMARKS'] || row['remarks'] || "";
+            const notes = `DEPOSIT: ${deposit} | REMARKS: ${remarks}`.trim();
 
             const userObj = {
               name,
               phone,
               member_id,
               address,
+              age,
               notes,
               subscription: "IMPORTED (LIFETIME)",
               expiry_date: new Date(new Date().getFullYear() + 50, 0, 1).toISOString(),
@@ -2381,9 +2383,14 @@ export default function App() {
                         <input name="occupation" placeholder="Student, Teacher, etc." className="input-field py-4 bg-slate-50/50 focus:bg-white" />
                       </div>
                       <div className="group text-left">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Postal Zone</label>
-                        <input name="pincode" placeholder="680XXX" className="input-field py-4 bg-slate-50/50 focus:bg-white" />
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">AGE</label>
+                        <input name="age" type="number" placeholder="Enter Age" className="input-field py-4 bg-slate-50/50 focus:bg-white" />
                       </div>
+                    </div>
+
+                    <div className="group text-left">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Postal Zone</label>
+                      <input name="pincode" placeholder="680XXX" className="input-field py-4 bg-slate-50/50 focus:bg-white" />
                     </div>
 
                     <div className="group text-left">
