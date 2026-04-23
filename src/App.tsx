@@ -98,6 +98,10 @@ export default function App() {
   const [subsYearlyFee, setSubsYearlyFee] = useState(100);
   const [subsLifetimeFee, setSubsLifetimeFee] = useState(1000);
   const [subsJoiningFee, setSubsJoiningFee] = useState(10);
+  const [adminPassword, setAdminPassword] = useState("VAYANASALA_ADMIN_2026");
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetKeyInput, setResetKeyInput] = useState("");
+  const [newPasswordReset, setNewPasswordReset] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -233,6 +237,7 @@ export default function App() {
         setSubsYearlyFee(data.subs_yearly_fee);
         setSubsLifetimeFee(data.subs_lifetime_fee);
         setSubsJoiningFee(data.subs_joining_fee);
+        if (data.admin_password) setAdminPassword(data.admin_password);
       }
     } catch (e) {
       console.error("Settings sync fatal error:", e);
@@ -516,9 +521,7 @@ export default function App() {
   const handleLogin = (e: FormEvent) => {
     e.preventDefault();
     // High-Security Passphrase
-    const secureKey = "VAYANASALA_ADMIN_2026";
-    const oldKey = "vayanasala1231";
-    if (passwordInput === secureKey || passwordInput === oldKey) {
+    if (passwordInput === adminPassword || passwordInput === "VAYANASALA_ADMIN_2026" || passwordInput === "vayanasala1231") {
       Swal.fire({
         icon: 'success',
         title: 'Access Granted',
@@ -543,6 +546,56 @@ export default function App() {
         input.classList.add('animate-shake');
         setTimeout(() => input.classList.remove('animate-shake'), 500);
       }
+    }
+  };
+
+  const handleResetPassword = async (e: FormEvent) => {
+    e.preventDefault();
+    if (resetKeyInput !== "@RESETKONDAZHY1231") {
+      Swal.fire({ 
+        icon: 'error', 
+        title: 'Invalid Reset Key', 
+        text: 'Unauthorized reset request detected.',
+        background: '#0F172A',
+        color: '#fff'
+      });
+      return;
+    }
+    if (newPasswordReset.length < 4) {
+      Swal.fire({ icon: 'error', title: 'Invalid Password', text: 'Administrative passwords must be at least 4 characters.' });
+      return;
+    }
+    
+    setLookupLoading(true);
+    try {
+      const { error } = await supabase
+        .from('lib_settings')
+        .update({ admin_password: newPasswordReset })
+        .eq('id', 1);
+        
+      if (error) {
+        // If column doesn't exist, we might need to inform or handle it
+        if (error.message.includes("column \"admin_password\" of relation \"lib_settings\" does not exist")) {
+           throw new Error("Master database node requires field expansion. Please contact system architect to add 'admin_password' to 'lib_settings'.");
+        }
+        throw error;
+      }
+      
+      setAdminPassword(newPasswordReset);
+      setShowResetModal(false);
+      setResetKeyInput("");
+      setNewPasswordReset("");
+      Swal.fire({ 
+        icon: 'success', 
+        title: 'Credentials Reset', 
+        text: 'New master password synchronized. Access nodes updated.',
+        background: '#0F172A',
+        color: '#fff'
+      });
+    } catch (e: any) {
+      Swal.fire({ icon: 'error', title: 'Reset Failed', text: e.message });
+    } finally {
+      setLookupLoading(false);
     }
   };
 
@@ -1828,6 +1881,14 @@ export default function App() {
               >
                 Unlock Repository
               </button>
+
+              <button 
+                type="button"
+                onClick={() => setShowResetModal(true)}
+                className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-accent transition-colors"
+              >
+                Forgot Logic Key?
+              </button>
             </form>
             
             <p className="text-[9px] text-slate-400 text-center mt-8 font-medium uppercase tracking-widest opacity-60">
@@ -1835,6 +1896,58 @@ export default function App() {
             </p>
           </div>
         </div>
+
+        {/* Password Reset Modal */}
+        {showResetModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+            <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm border border-slate-200">
+              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-2">Emergency Reset</h3>
+              <p className="text-xs text-slate-500 font-medium mb-6">Enter the master synchronization key to overwrite administrative credentials.</p>
+              
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                <div>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2 px-1">Master Reset Key</label>
+                  <input 
+                    type="password" 
+                    value={resetKeyInput}
+                    onChange={(e) => setResetKeyInput(e.target.value)}
+                    placeholder="ADMIN_MASTER_KEY"
+                    className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-3 text-sm font-mono"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2 px-1">New System Password</label>
+                  <input 
+                    type="password" 
+                    value={newPasswordReset}
+                    onChange={(e) => setNewPasswordReset(e.target.value)}
+                    placeholder="New Password"
+                    className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-3 text-sm font-mono"
+                    required
+                  />
+                </div>
+                
+                <div className="flex gap-2 pt-2">
+                  <button 
+                    type="submit" 
+                    disabled={lookupLoading}
+                    className="flex-[2] bg-accent text-white rounded-xl py-3 font-black text-[10px] uppercase tracking-widest shadow-lg shadow-accent/20 hover:scale-105 transition-all disabled:opacity-50"
+                  >
+                    {lookupLoading ? 'Synchronizing...' : 'Update Credentials'}
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => setShowResetModal(false)}
+                    className="flex-1 bg-slate-100 text-slate-500 rounded-xl py-3 font-black text-[10px] uppercase tracking-widest hover:bg-slate-200"
+                  >
+                    Abort
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
