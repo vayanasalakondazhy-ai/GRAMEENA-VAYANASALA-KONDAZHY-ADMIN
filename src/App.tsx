@@ -355,9 +355,7 @@ export default function App() {
   const [returnType, setReturnType] = useState("stock");
   const [foundReturnBooks, setFoundReturnBooks] = useState<any[]>([]);
   const [selectedReturnBook, setSelectedReturnBook] = useState<any>(null);
-  const [isAuthorized, setIsAuthorized] = useState<boolean>(() => {
-    return localStorage.getItem("lib_admin_auth") === "true";
-  });
+  const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [isManglishEnabled, setIsManglishEnabled] = useState(false);
   const [userHistory, setUserHistory] = useState<any[]>([]);
@@ -511,7 +509,6 @@ export default function App() {
       showConfirmButton: false,
       didOpen: () => Swal.showLoading()
     }).then(() => {
-      localStorage.removeItem("lib_admin_auth");
       setIsAuthorized(false);
     });
   };
@@ -531,7 +528,6 @@ export default function App() {
         background: '#0F172A',
         color: '#fff'
       });
-      localStorage.setItem("lib_admin_auth", "true");
       setIsAuthorized(true);
     } else {
       Swal.fire({
