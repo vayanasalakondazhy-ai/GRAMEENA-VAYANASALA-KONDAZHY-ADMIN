@@ -111,6 +111,7 @@ export default function App() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResults, setLookupResults] = useState<any[]>([]);
   const [scannedBook, setScannedBook] = useState<any>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const [lang, setLang] = useState<"en" | "ml">("en");
 
   // Translation Dictionary
@@ -984,6 +985,7 @@ export default function App() {
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
+      padding: '2rem',
       cancelButtonColor: '#94a3b8',
       confirmButtonText: 'Yes, Revoke Access'
     });
@@ -999,6 +1001,85 @@ export default function App() {
       loadDashboard();
       if (viewUserModal && viewUserModal.id === id) setViewUserModal(null);
     }
+  };
+
+  const handleBulkImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        const rows = results.data as any[];
+        let successCount = 0;
+        let failCount = 0;
+
+        Swal.fire({
+          title: 'Ingesting Registry...',
+          html: '<div class="text-xs font-bold font-mono">Parsing relational book nodes...</div>',
+          allowOutsideClick: false,
+          didOpen: () => Swal.showLoading()
+        });
+
+        for (const row of rows) {
+          try {
+            // Mapping: Timestamp,SERAL NO,FUL NAME,MOB NO,FULL ADDRESS,AGE,DATE OF JOINING,DEPOSIT AMOUNT,REMARKS
+            const name = row['FUL NAME'] || row['Full Name'] || row['name'] || "Unknown";
+            const phone = row['MOB NO'] || row['Mobile'] || row['phone'] || "";
+            const member_id = row['SERAL NO'] || row['Serial No'] || row['member_id'] || `M-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+            const address = row['FULL ADDRESS'] || row['Address'] || "";
+            const joiningDateRaw = row['DATE OF JOINING'] || row['Joining Date'] || row['created_at'];
+            const joiningDate = joiningDateRaw ? new Date(joiningDateRaw).toISOString() : new Date().toISOString();
+            
+            // Age, Deposit, Remarks in notes
+            const age = row['AGE'] || "";
+            const deposit = row['DEPOSIT AMOUNT'] || "";
+            const remarks = row['REMARKS'] || "";
+            const notes = `AGE: ${age} | DEPOSIT: ${deposit} | REMARKS: ${remarks}`.trim();
+
+            const userObj = {
+              name,
+              phone,
+              member_id,
+              address,
+              notes,
+              subscription: "IMPORTED (LIFETIME)",
+              expiry_date: new Date(new Date().getFullYear() + 50, 0, 1).toISOString(),
+              created_at: joiningDate
+            };
+
+            const { error } = await supabase.from("users").insert([userObj]);
+            if (error) failCount++;
+            else successCount++;
+          } catch (err) {
+            failCount++;
+          }
+        }
+
+        setIsImporting(false);
+        loadMembers();
+        loadDashboard();
+        
+        Swal.fire({
+          icon: successCount > 0 ? 'success' : 'info',
+          title: 'Import Sequence Finalized',
+          html: `<div class="text-left py-2">
+            <p className="text-xs">Processing statistics:</p>
+            <ul className="text-[10px] mt-2 space-y-1 font-mono uppercase">
+              <li className="text-emerald-500">Node Injected: ${successCount}</li>
+              <li className="text-red-500">Faulty Nodes: ${failCount}</li>
+            </ul>
+          </div>`,
+          background: '#0F172A',
+          color: '#fff'
+        });
+      }
+    });
+    // Reset file input
+    e.target.value = '';
   };
 
   const addBook = async (e: FormEvent) => {
@@ -2234,6 +2315,22 @@ export default function App() {
                   <div>
                     <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">REGISTER NEW MEMBER</h3>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mt-1">Registry Entry Protocol v3.0</p>
+                  </div>
+                  <div className="flex-1 flex justify-end gap-2">
+                    <input 
+                      type="file" 
+                      id="bulk-import-members" 
+                      accept=".csv" 
+                      className="hidden" 
+                      onChange={handleBulkImport}
+                    />
+                    <button 
+                      type="button" 
+                      onClick={() => document.getElementById('bulk-import-members')?.click()}
+                      className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all border border-slate-200 shadow-sm flex items-center gap-2"
+                    >
+                      📂 Bulk Import
+                    </button>
                   </div>
                   <div className="absolute right-0 top-0 opacity-5 pointer-events-none">
                     <span className="text-6xl font-black italic">NEW</span>
