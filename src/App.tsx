@@ -106,6 +106,10 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [financialStats, setFinancialStats] = useState({ total: 0, fines: 0, subs: 0 });
+  const [vouchers, setVouchers] = useState<any[]>([]);
+  const [voucherSearch, setVoucherSearch] = useState("");
+  const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
+  const [isVoucherLoading, setIsVoucherLoading] = useState(false);
   const [addMode, setAddMode] = useState<"manual" | "barcode">("manual");
   const [isbnLookup, setIsbnLookup] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -186,6 +190,73 @@ export default function App() {
   const scannerRef = useRef<Html5Qrcode | null>(null);
 
   // Beep Sound for Scanner
+  const fetchVouchers = useCallback(async () => {
+    setIsVoucherLoading(true);
+    const { data, error } = await supabase
+      .from('vouchers')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (!error && data) {
+      setVouchers(data);
+    }
+    setIsVoucherLoading(false);
+  }, []);
+
+  const addVoucher = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const voucherData = {
+      voucher_number: String(formData.get("voucher_number")),
+      name: String(formData.get("name")),
+      date: String(formData.get("date")),
+      description: String(formData.get("description")),
+      amount: parseFloat(String(formData.get("amount") || "0")),
+      is_passed: false
+    };
+
+    const { error } = await supabase.from('vouchers').insert([voucherData]);
+    if (error) {
+      Swal.fire("Error", error.message, "error");
+    } else {
+      Swal.fire("Success", "Voucher uploaded successfully", "success");
+      setIsVoucherModalOpen(false);
+      fetchVouchers();
+    }
+  };
+
+  const toggleVoucherStatus = async (id: number, currentStatus: boolean) => {
+    const { error } = await supabase
+      .from('vouchers')
+      .update({ is_passed: !currentStatus })
+      .eq('id', id);
+
+    if (error) {
+      Swal.fire("Error", error.message, "error");
+    } else {
+      fetchVouchers();
+    }
+  };
+
+  const deleteVoucher = async (id: number) => {
+    const result = await Swal.fire({
+      title: "Are you sure?",
+      text: "You won't be able to revert this!",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, delete it!"
+    });
+
+    if (result.isConfirmed) {
+      const { error } = await supabase.from('vouchers').delete().eq('id', id);
+      if (error) {
+        Swal.fire("Error", error.message, "error");
+      } else {
+        fetchVouchers();
+      }
+    }
+  };
+
   const playBeep = () => {
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -1808,7 +1879,7 @@ export default function App() {
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
-    link.setAttribute("download", `Vayanashala_Members_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `Vayanasala_Members_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -1916,11 +1987,13 @@ export default function App() {
     loadTodayAttendance();
     loadTransactions();
     loadLibrarySettings();
-  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions, loadLibrarySettings]);
+    fetchVouchers();
+  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions, loadLibrarySettings, fetchVouchers]);
 
   useEffect(() => {
     if (activeTab === "reports") loadReports();
-  }, [activeTab, loadReports]);
+    if (activeTab === "vouchers") fetchVouchers();
+  }, [activeTab, loadReports, fetchVouchers]);
 
   // Real-time listener
   useEffect(() => {
@@ -1930,13 +2003,16 @@ export default function App() {
         loadDashboard();
         loadIssued();
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vouchers' }, () => {
+        fetchVouchers();
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
         loadDashboard();
         loadMembers();
       })
       .subscribe();
     return () => { channel.unsubscribe(); };
-  }, [loadDashboard, loadIssued, loadMembers]);
+  }, [loadDashboard, loadIssued, loadMembers, fetchVouchers]);
 
   if (!isAuthorized) {
     return (
@@ -2116,6 +2192,7 @@ export default function App() {
           <ul className="list-none space-y-1 mb-6">
             {[
               { id: "engagement", label: "Engagement Hub", icon: "🔔" },
+              { id: "vouchers", label: "Voucher Hub", icon: "🎫" },
               { id: "map", label: "Store Mapping", icon: "🗺️" },
               { id: "settings", label: t('config'), icon: "⚙️" },
               { id: "reports", label: t('reports'), icon: "📈" },
@@ -2210,9 +2287,9 @@ export default function App() {
                     dbStatus === 'checking' ? 'bg-amber-500' :
                     'bg-red-500'
                   }`}></span>
-                  {dbStatus === 'connected' ? 'SUPABASE: ONLINE' : 
-                  dbStatus === 'checking' ? 'SUPABASE: SYNCING' :
-                  'SUPABASE: OFFLINE'}
+                  {dbStatus === 'connected' ? 'DATABASE: ONLINE' : 
+                  dbStatus === 'checking' ? 'DATABASE: SYNCING' :
+                  'DATABASE: OFFLINE'}
                 </div>
                 <div className="flex items-center gap-3">
                   <p className="text-2xl font-black text-slate-800 tracking-tighter tabular-nums font-mono">
@@ -2668,7 +2745,7 @@ export default function App() {
                                 ⚡
                               </button>
                               <a 
-                                href={`https://wa.me/91${u.phone}?text=Hello ${u.name}, this is a notification from Vayanashala Library regarding your account.`}
+                                href={`https://wa.me/91${u.phone}?text=Hello ${u.name}, this is a notification from Vayanasala Library regarding your account.`}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="w-10 h-10 flex items-center justify-center bg-green-50 border border-green-100 text-green-500 rounded-xl hover:bg-green-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" 
@@ -3370,6 +3447,193 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* VOUCHER HUB */}
+        {activeTab === "vouchers" && (
+          <div className="flex flex-col gap-6 animate-in fade-in duration-500">
+             <div className="flex justify-between items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-800 tracking-tight">Voucher Management</h2>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Financial Disbursement Registry</p>
+                </div>
+                <button 
+                  onClick={() => setIsVoucherModalOpen(true)}
+                  className="bg-primary text-white px-8 py-3 rounded-2xl font-black text-[10px] tracking-widest uppercase shadow-xl shadow-primary/20 hover:scale-105 transition-all flex items-center gap-2"
+                >
+                  <span>➕</span> UPLOAD NEW VOUCHER
+                </button>
+             </div>
+
+             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div className="lg:col-span-3">
+                  <div className="section-card">
+                    <div className="section-header border-b border-slate-50 flex justify-between items-center">
+                      <h2 className="text-sm font-black text-slate-700">All Vouchers</h2>
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          placeholder="SEARCH VOUCHERS..."
+                          value={voucherSearch}
+                          onChange={(e) => setVoucherSearch(e.target.value)}
+                          className="bg-slate-50 text-[10px] font-bold px-4 py-2 rounded-xl outline-none focus:bg-white border focus:border-accent w-48 uppercase tracking-widest"
+                        />
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                        <thead>
+                          <tr className="bg-slate-50/50">
+                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">No. & Name</th>
+                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Date</th>
+                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount</th>
+                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {isVoucherLoading ? (
+                             <tr><td colSpan={5} className="py-20 text-center text-slate-400 font-bold uppercase tracking-widest animate-pulse">Syncing Voucher Core...</td></tr>
+                          ) : vouchers.filter(v => 
+                              v.name.toLowerCase().includes(voucherSearch.toLowerCase()) || 
+                              v.voucher_number.toLowerCase().includes(voucherSearch.toLowerCase())
+                            ).map((v) => (
+                            <tr key={v.id} className="hover:bg-slate-50 transition-colors group">
+                              <td className="px-6 py-4">
+                                <div className="font-black text-slate-800 text-sm">{v.name}</div>
+                                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">#V-{v.voucher_number}</div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="text-xs font-bold text-slate-600">{new Date(v.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="text-sm font-black text-slate-800">₹{v.amount}</div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <button 
+                                  onClick={() => toggleVoucherStatus(v.id, v.is_passed)}
+                                  className={`px-3 py-1 rounded-full text-[9px] font-black tracking-widest uppercase transition-all ${
+                                    v.is_passed 
+                                      ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' 
+                                      : 'bg-amber-50 text-amber-600 border border-amber-100'
+                                  }`}
+                                >
+                                  {v.is_passed ? "✅ PASSED" : "⏳ PENDING"}
+                                </button>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <button 
+                                  onClick={() => deleteVoucher(v.id)}
+                                  className="text-slate-300 hover:text-red-500 transition-colors"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                   <div className="bg-slate-900 rounded-[32px] p-6 text-white shadow-2xl relative overflow-hidden">
+                      <div className="absolute top-0 right-0 p-4 opacity-10 font-black italic text-4xl select-none">STATS</div>
+                      <h3 className="text-xs font-black text-white/40 uppercase tracking-[0.3em] mb-4">Financial Health</h3>
+                      <div className="space-y-4">
+                         <div>
+                            <p className="text-[10px] font-bold text-white/30 uppercase tracking-widest">Total Disbursements</p>
+                            <p className="text-3xl font-black tabular-nums">₹{vouchers.reduce((acc, v) => acc + (v.amount || 0), 0).toLocaleString()}</p>
+                         </div>
+                         <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/5">
+                            <div>
+                               <p className="text-[9px] font-bold text-emerald-400/60 uppercase tracking-widest">Passed</p>
+                               <p className="text-lg font-black text-emerald-400">₹{vouchers.filter(v => v.is_passed).reduce((acc, v) => acc + (v.amount || 0), 0).toLocaleString()}</p>
+                            </div>
+                            <div>
+                               <p className="text-[9px] font-bold text-amber-400/60 uppercase tracking-widest">Pending</p>
+                               <p className="text-lg font-black text-amber-400">₹{vouchers.filter(v => !v.is_passed).reduce((acc, v) => acc + (v.amount || 0), 0).toLocaleString()}</p>
+                            </div>
+                         </div>
+                      </div>
+                   </div>
+
+                   <div className="bg-white rounded-[32px] p-6 border border-slate-100 shadow-sm">
+                      <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Quick Insights</h3>
+                      <p className="text-[10px] text-slate-500 leading-relaxed font-medium">
+                        Last voucher processed: <span className="font-bold text-slate-800">{vouchers.length > 0 ? new Date(vouchers[0].created_at).toLocaleString() : 'N/A'}</span>
+                      </p>
+                   </div>
+                </div>
+             </div>
+          </div>
+        )}
+
+        {/* VOUCHER UPLOAD MODAL */}
+        <AnimatePresence>
+          {isVoucherModalOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsVoucherModalOpen(false)}
+                className="absolute inset-0 bg-slate-900/80 backdrop-blur-md"
+              />
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="bg-white w-full max-w-lg rounded-[40px] shadow-2xl relative z-10 overflow-hidden border border-white/20"
+              >
+                <div className="bg-slate-900 p-8 text-white">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h2 className="text-2xl font-black tracking-tighter uppercase italic">Voucher Entry</h2>
+                      <p className="text-[10px] text-white/40 font-bold uppercase tracking-[0.4em] mt-1">Transaction Capture Node</p>
+                    </div>
+                    <button onClick={() => setIsVoucherModalOpen(false)} className="text-white/40 hover:text-white transition-colors">✕</button>
+                  </div>
+                </div>
+                
+                <form onSubmit={addVoucher} className="p-8 space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Voucher Number</label>
+                       <input name="voucher_number" required placeholder="001" className="w-full bg-slate-50 border-2 border-slate-100 focus:border-accent rounded-2xl px-5 py-4 text-sm outline-none transition-all" />
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Date</label>
+                       <input name="date" type="date" required defaultValue={new Date().toISOString().split('T')[0]} className="w-full bg-slate-50 border-2 border-slate-100 focus:border-accent rounded-2xl px-5 py-4 text-sm outline-none transition-all" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Payee Name</label>
+                     <input name="name" required placeholder="Enter name or institution" className="w-full bg-slate-50 border-2 border-slate-100 focus:border-accent rounded-2xl px-5 py-4 text-sm outline-none transition-all" />
+                  </div>
+
+                  <div className="space-y-2">
+                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Amount (₹)</label>
+                     <input name="amount" type="number" step="0.01" required placeholder="0.00" className="w-full bg-slate-50 border-2 border-slate-100 focus:border-accent rounded-2xl px-5 py-4 text-sm outline-none transition-all font-mono" />
+                  </div>
+
+                  <div className="space-y-2">
+                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Description</label>
+                     <textarea name="description" placeholder="Purpose of payment..." rows={3} className="w-full bg-slate-50 border-2 border-slate-100 focus:border-accent rounded-2xl px-5 py-4 text-sm outline-none transition-all resize-none" />
+                  </div>
+
+                  <button 
+                    type="submit" 
+                    className="w-full bg-primary text-white rounded-2xl py-5 font-black text-xs uppercase tracking-[0.3em] hover:bg-black transition-all shadow-xl shadow-primary/20 active:scale-95"
+                  >
+                    Commit to Ledger
+                  </button>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
         {activeTab === "settings" && (
           <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-8 duration-700">
