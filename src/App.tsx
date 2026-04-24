@@ -1036,20 +1036,37 @@ export default function App() {
             const joiningDate = joiningDateRaw ? new Date(joiningDateRaw).toISOString() : new Date().toISOString();
             
             // Age, Deposit, Remarks
-            const age = row['AGE'] || row['age'] || "";
-            const deposit = row['DEPOSIT AMOUNT'] || row['deposit'] || "";
-            const remarks = row['REMARKS'] || row['remarks'] || "";
-            const notes = `DEPOSIT: ${deposit} | REMARKS: ${remarks}`.trim();
+            const ageRaw = row['AGE'] || row['Age'] || row['age'] || "";
+            const depositRaw = row['DEPOSIT AMOUNT'] || row['Deposit'] || row['deposit'] || "";
+            const remarks = row['REMARKS'] || row['Remarks'] || row['remarks'] || "";
+            const notes = `DEPOSIT: ${depositRaw} | REMARKS: ${remarks}`.trim();
+
+            let subscription = "IMPORTED (LIFETIME)";
+            let expiry_date = new Date(new Date().getFullYear() + 50, 0, 1).toISOString();
+
+            const depositVal = parseInt(depositRaw.toString());
+            if (depositVal === 130) {
+              subscription = "YEARLY (1 Years)";
+              const exp = new Date(joiningDate);
+              exp.setFullYear(exp.getFullYear() + 1);
+              expiry_date = exp.toISOString();
+            } else if ([10, 20, 30, 40, 50, 60, 70, 80, 90].includes(depositVal)) {
+              const months = depositVal / 10;
+              subscription = `MONTHLY (${months} Months)`;
+              const exp = new Date(joiningDate);
+              exp.setMonth(exp.getMonth() + months);
+              expiry_date = exp.toISOString();
+            }
 
             const userObj = {
               name,
               phone,
               member_id,
               address,
-              age,
+              age: ageRaw,
               notes,
-              subscription: "IMPORTED (LIFETIME)",
-              expiry_date: new Date(new Date().getFullYear() + 50, 0, 1).toISOString(),
+              subscription,
+              expiry_date,
               created_at: joiningDate
             };
 
