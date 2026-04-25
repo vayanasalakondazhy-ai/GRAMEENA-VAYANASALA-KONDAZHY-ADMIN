@@ -110,6 +110,10 @@ export default function App() {
   const [voucherSearch, setVoucherSearch] = useState("");
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
   const [isVoucherLoading, setIsVoucherLoading] = useState(false);
+  const [circulationSubTab, setCirculationSubTab] = useState<"issue" | "return">("issue");
+  const [vayanavasanthamIssued, setVayanavasanthamIssued] = useState<any[]>([]);
+  const [vayanavasanthamSubTab, setVayanavasanthamSubTab] = useState<"issue" | "return" | "ledger">("issue");
+  const [isVayanavasanthamLoading, setIsVayanavasanthamLoading] = useState(false);
   const [addMode, setAddMode] = useState<"manual" | "barcode">("manual");
   const [isbnLookup, setIsbnLookup] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -677,6 +681,7 @@ export default function App() {
       const { count: bCount, error: bErr } = await supabase.from("books").select("*", { count: "exact", head: true });
       const { count: uCount, error: uErr } = await supabase.from("users").select("*", { count: "exact", head: true });
       const { count: iCount, error: iErr } = await supabase.from("issued_books").select("*", { count: "exact", head: true });
+      const { count: vvCount } = await supabase.from("vayanavasantham_issued").select("*", { count: "exact", head: true });
       
       if (bErr || uErr || iErr) {
         console.warn("Dashboard sync warning:", bErr || uErr || iErr);
@@ -685,7 +690,7 @@ export default function App() {
       setCounts({ 
         books: bCount || 0, 
         users: uCount || 0, 
-        issued: iCount || 0 
+        issued: (iCount || 0) + (vvCount || 0) 
       });
     } catch (e) {
       console.error("Dashboard sync fatal error:", e);
@@ -743,11 +748,17 @@ export default function App() {
     const { data: booksData } = await query.limit(50).order('id', { ascending: false });
 
     const { data: issuedData } = await supabase.from("issued_books").select("*");
+    const { data: vvData } = await supabase.from("vayanavasantham_issued").select("*");
+    
     const issuedMap: Record<string, any> = {};
-    issuedData?.forEach(d => {
-      if (d.book_id) issuedMap[d.book_id] = d;
-      if (d.stock_number) issuedMap[d.stock_number] = d;
-    });
+    const processMap = (data: any[]) => {
+      data?.forEach(d => {
+        if (d.book_id) issuedMap[d.book_id] = d;
+        if (d.stock_number) issuedMap[d.stock_number] = d;
+      });
+    };
+    processMap(issuedData || []);
+    processMap(vvData || []);
 
     if (booksData) {
       const processed = booksData.map(b => {
@@ -773,7 +784,41 @@ export default function App() {
     const userMap: Record<string, any> = {};
     usersData?.forEach(u => userMap[u.phone] = u);
 
+    // Fetch from both tables
     const { data: issuedData } = await supabase.from("issued_books").select("*");
+    const { data: vvData } = await supabase.from("vayanavasantham_issued").select("*");
+
+    const processIssued = async (data: any[], project?: string) => {
+      if (!data) return [];
+      return await Promise.all(data.map(async (d) => {
+        const { data: bData } = await supabase.from("books").select("*").eq("id", d.book_id).maybeSingle();
+        const b = bData || {};
+        const user = userMap[d.user_phone] || {};
+        const today = new Date();
+        const due = new Date(d.due_date);
+        let status = "issued", label = "Issued", fine = 0;
+        if (today > due) {
+          status = "overdue"; label = "Overdue";
+          const daysOverdue = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+          fine = daysOverdue * fineAmount;
+        }
+        return { ...d, book: b, user, status, label, fine, project: project || "Regular" };
+      }));
+    };
+
+    const regularIssued = await processIssued(issuedData || []);
+    const vvIssued = await processIssued(vvData || [], "Vayanavasantham");
+    
+    setIssuedBooks([...regularIssued, ...vvIssued]);
+  }, [fineAmount]);
+
+  const fetchVayanavasanthamIssued = useCallback(async () => {
+    setIsVayanavasanthamLoading(true);
+    const { data: usersData } = await supabase.from("users").select("*");
+    const userMap: Record<string, any> = {};
+    usersData?.forEach(u => userMap[u.phone] = u);
+
+    const { data: issuedData } = await supabase.from("vayanavasantham_issued").select("*");
     if (issuedData) {
       const fullData = await Promise.all(issuedData.map(async (d) => {
         const { data: bData } = await supabase.from("books").select("*").eq("id", d.book_id).maybeSingle();
@@ -787,11 +832,73 @@ export default function App() {
           const daysOverdue = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
           fine = daysOverdue * fineAmount;
         }
-        return { ...d, book: b, user, status, label, fine };
+        return { ...d, book: b, user, status, label, fine, project: 'Vayanavasantham' };
       }));
-      setIssuedBooks(fullData);
+      setVayanavasanthamIssued(fullData);
     }
-  }, []);
+    setIsVayanavasanthamLoading(false);
+  }, [fineAmount]);
+
+  const issueVayanavasanthamBook = async () => {
+    if (!selectedIssueBook || !selectedIssueUserPhone) return alert("Select book and user");
+
+    const { data: existing } = await supabase.from("vayanavasantham_issued").select("*").eq("book_id", selectedIssueBook.id).maybeSingle();
+    if (existing) return Swal.fire({ icon: 'error', title: 'Oops!', text: 'This book is already issued under this project.' });
+
+    const now = new Date();
+    const due = new Date();
+    due.setMonth(due.getMonth() + 1);
+
+    const { error } = await supabase.from("vayanavasantham_issued").insert([{
+      book_id: selectedIssueBook.id,
+      stock_number: selectedIssueBook.stocknumber,
+      user_phone: selectedIssueUserPhone,
+      issue_date: now.toISOString(),
+      due_date: due.toISOString()
+    }]);
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        Swal.fire({ icon: 'error', title: 'Table Missing', text: 'The table "vayanavasantham_issued" does not exist in your Supabase database. Please create it first.' });
+      } else {
+        alert(error.message);
+      }
+    } else {
+      Swal.fire({ icon: 'success', title: 'Vayanavasantham Issue Successful!', timer: 1500, showConfirmButton: false });
+      setSelectedIssueBook(null);
+      setIssueSearchVal("");
+      setFoundIssueBooks([]);
+      fetchVayanavasanthamIssued();
+      loadIssued();
+      loadDashboard();
+    }
+  };
+
+  const returnVayanavasanthamBook = async (selectedBook: any) => {
+    if (!selectedBook) return alert("Select a book first");
+    
+    const historyEntry = {
+      book_title: selectedBook.book?.title || "Unknown Asset",
+      stock_number: selectedBook.stock_number,
+      user_phone: selectedBook.user_phone,
+      issue_date: selectedBook.issue_date,
+      return_date: new Date().toISOString(),
+      status: 'returned',
+      project: 'Vayanavasantham'
+    };
+    
+    await supabase.from("borrowing_history").insert([historyEntry]);
+
+    const { error } = await supabase.from("vayanavasantham_issued").delete().eq("id", selectedBook.id);
+    if (error) {
+      Swal.fire({ icon: 'error', title: 'Return Interrupted', text: error.message });
+    } else {
+      Swal.fire({ icon: 'success', title: 'Returned to Library!', timer: 1500, showConfirmButton: false });
+      fetchVayanavasanthamIssued();
+      loadIssued();
+      loadDashboard();
+    }
+  };
 
   // Attendance
   const loadTodayAttendance = useCallback(async () => {
@@ -1988,12 +2095,14 @@ export default function App() {
     loadTransactions();
     loadLibrarySettings();
     fetchVouchers();
-  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions, loadLibrarySettings, fetchVouchers]);
+    fetchVayanavasanthamIssued();
+  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions, loadLibrarySettings, fetchVouchers, fetchVayanavasanthamIssued]);
 
   useEffect(() => {
     if (activeTab === "reports") loadReports();
     if (activeTab === "vouchers") fetchVouchers();
-  }, [activeTab, loadReports, fetchVouchers]);
+    if (activeTab === "vayanavasantham") fetchVayanavasanthamIssued();
+  }, [activeTab, loadReports, fetchVouchers, fetchVayanavasanthamIssued]);
 
   // Real-time listener
   useEffect(() => {
@@ -2001,6 +2110,10 @@ export default function App() {
       .channel('schema-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'issued_books' }, () => {
         loadDashboard();
+        loadIssued();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vayanavasantham_issued' }, () => {
+        fetchVayanavasanthamIssued();
         loadIssued();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vouchers' }, () => {
@@ -2169,10 +2282,28 @@ export default function App() {
           <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Circulation</div>
           <ul className="list-none space-y-1 mb-6">
             {[
-              { id: "circulation", label: t('issue'), icon: "🛫" },
-              { id: "return", label: t('return'), icon: "🛬" },
-              { id: "issuedList", label: "Live Ledger", icon: "📋" },
+              { id: "circulation", label: "Asset Ops", icon: "📋" },
+              { id: "issuedList", label: "Live Ledger", icon: "📑" },
               { id: "financials", label: t('finance'), icon: "💰" }
+            ].map(tab => (
+              <li
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-6 py-2.5 text-sm cursor-pointer transition-all flex items-center gap-3 border-r-4 ${
+                  activeTab === tab.id 
+                    ? 'bg-white/10 text-white border-accent font-semibold' 
+                    : 'text-slate-400 border-transparent hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <span>{tab.icon}</span> {tab.label}
+              </li>
+            ))}
+          </ul>
+
+          <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Community Projects</div>
+          <ul className="list-none space-y-1 mb-6">
+            {[
+              { id: "vayanavasantham", label: "Vayanavasantham", icon: "🏠" },
             ].map(tab => (
               <li
                 key={tab.id}
@@ -3449,6 +3580,182 @@ export default function App() {
         )}
 
         {/* VOUCHER HUB */}
+        {/* VAYANAVASANTHAM PROJECT HUB */}
+        {activeTab === "vayanavasantham" && (
+          <div className="flex flex-col gap-6 animate-in fade-in duration-500">
+            <div className="flex gap-4 p-1 bg-slate-100 rounded-2xl w-fit">
+              <button 
+                onClick={() => setVayanavasanthamSubTab("issue")}
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all ${
+                  vayanavasanthamSubTab === "issue" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                🏘️ Home Delivery (Issue)
+              </button>
+              <button 
+                onClick={() => setVayanavasanthamSubTab("return")}
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all ${
+                  vayanavasanthamSubTab === "return" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                📥 Collect Back (Return)
+              </button>
+              <button 
+                onClick={() => setVayanavasanthamSubTab("ledger")}
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all ${
+                  vayanavasanthamSubTab === "ledger" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                📖 Project Ledger
+              </button>
+            </div>
+
+            {vayanavasanthamSubTab === "issue" && (
+              <div className="max-w-4xl section-card">
+                <div className="section-header">
+                  <h2 className="text-xl font-black text-slate-800">Vayanavasantham: Home Distribution</h2>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Librarian-to-Doorstep Initiative</p>
+                </div>
+                <div className="p-6 space-y-6">
+                  <input 
+                    placeholder="Scan Asset Stock ID for delivery..." 
+                    value={issueSearchVal}
+                    onChange={(e) => setIssueSearchVal(e.target.value)}
+                    className="input-field font-mono" 
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[320px] overflow-y-auto pr-2">
+                    {foundIssueBooks.map(b => (
+                      <div 
+                        key={b.id}
+                        onClick={() => !b.isIssued && setSelectedIssueBook(b)}
+                        className={`p-4 rounded-xl border flex justify-between items-start transition-all relative ${
+                          selectedIssueBook?.id === b.id 
+                            ? 'border-accent bg-blue-50/50 ring-2 ring-accent/20' 
+                            : b.isIssued ? 'opacity-40 grayscale cursor-not-allowed border-surface-border bg-slate-50' : 'cursor-pointer border-surface-border hover:bg-slate-50'
+                        }`}
+                      >
+                        <div>
+                          <div className="font-bold text-sm">📘 {b.title}</div>
+                          <div className="text-[10px] text-text-muted mt-1 underline">STOCK: {b.stocknumber}</div>
+                        </div>
+                        <div className={`text-[10px] font-black tracking-tight ${b.isIssued ? 'text-error' : 'text-emerald-600'}`}>
+                          {b.isIssued ? 'ISSUED' : 'AVAIL'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="pt-4 border-t border-surface-border">
+                    <p className="text-[10px] font-bold text-text-muted uppercase mb-2">TARGET HOUSEHOLD (Member)</p>
+                    <select 
+                      value={selectedIssueUserPhone} 
+                      onChange={(e) => setSelectedIssueUserPhone(e.target.value)}
+                      className="input-field"
+                    >
+                      <option value="">-- Select Member Account --</option>
+                      {members.map(m => (
+                        <option key={m.id} value={m.phone}>{m.name} ({m.phone})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button onClick={issueVayanavasanthamBook} className="bg-primary text-white w-full py-4 rounded-2xl uppercase font-black text-[11px] tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">Record Delivery Dispatch</button>
+                </div>
+              </div>
+            )}
+
+            {vayanavasanthamSubTab === "return" && (
+              <div className="max-w-xl section-card">
+                <div className="section-header">
+                  <h2 className="text-xl font-black text-slate-800">Return Collection</h2>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Collecting back from Households</p>
+                </div>
+                <div className="p-6 space-y-6">
+                  <div className="flex gap-2">
+                    <input 
+                      placeholder="Enter Stock ID to collect..." 
+                      value={returnSearchVal} 
+                      onChange={(e) => setReturnSearchVal(e.target.value)} 
+                      className="flex-grow input-field font-mono" 
+                    />
+                  </div>
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {vayanavasanthamIssued.filter(v => v.stock_number.includes(returnSearchVal)).map(d => (
+                      <div 
+                        key={d.id}
+                        className="p-4 rounded-xl border border-surface-border flex justify-between items-center group"
+                      >
+                        <div>
+                          <div className="font-bold text-sm text-slate-800">{d.book?.title}</div>
+                          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tight mt-1">STOCK: {d.stock_number} | USER: {d.user?.name || d.user_phone}</div>
+                        </div>
+                        <button 
+                          onClick={() => returnVayanavasanthamBook(d)}
+                          className="bg-accent text-white px-4 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all hover:bg-slate-900"
+                        >
+                          RECEIVE
+                        </button>
+                      </div>
+                    ))}
+                    {vayanavasanthamIssued.length === 0 && <p className="text-center py-10 text-slate-400 text-xs font-bold uppercase">No active Vayanavasantham deliveries</p>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {vayanavasanthamSubTab === "ledger" && (
+              <div className="section-card">
+                <div className="section-header flex justify-between items-center">
+                  <div>
+                    <h2 className="text-xl font-black text-slate-800">Vayanavasantham: Distribution Ledger</h2>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Live Housewise Distribution</p>
+                  </div>
+                  <div className="bg-primary/5 text-primary px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest">
+                    Active House Deliveries: {vayanavasanthamIssued.length}
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr>
+                        <th className="table-header">Asset (Project Item)</th>
+                        <th className="table-header">Household Member</th>
+                        <th className="table-header">Issue Date</th>
+                        <th className="table-header">Due Date</th>
+                        <th className="table-header text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {isVayanavasanthamLoading ? (
+                        <tr><td colSpan={5} className="py-20 text-center text-slate-400 animate-pulse uppercase font-black text-xs">Synchronizing Project Core...</td></tr>
+                      ) : vayanavasanthamIssued.map(d => (
+                        <tr key={d.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="table-cell">
+                            <div className="text-xs font-black text-slate-500">{d.stock_number}</div>
+                            <div className="font-bold text-slate-800">{d.book?.title}</div>
+                          </td>
+                          <td className="table-cell">
+                            <div className="font-bold text-slate-700">{d.user?.name || d.user_phone}</div>
+                            <div className="text-[10px] text-slate-400">{d.user_phone}</div>
+                          </td>
+                          <td className="table-cell font-mono text-xs font-bold text-text-muted">{d.issue_date?.split("T")[0]}</td>
+                          <td className="table-cell font-mono text-xs font-bold text-text-muted">{d.due_date?.split("T")[0]}</td>
+                          <td className="table-cell text-right">
+                             <button 
+                               onClick={() => returnVayanavasanthamBook(d)}
+                               className="text-accent font-black text-[10px] uppercase tracking-widest hover:underline"
+                             >
+                               RETURN NOW
+                             </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === "vouchers" && (
           <div className="flex flex-col gap-6 animate-in fade-in duration-500">
              <div className="flex justify-between items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
@@ -3941,98 +4248,120 @@ export default function App() {
           </div>
         )}
 
-        {/* ISSUE (CIRCULATION) */}
+        {/* ASSET OPERATIONS (CIRCULATION) */}
         {activeTab === "circulation" && (
-          <div className="max-w-4xl section-card">
-            <div className="section-header">
-              <h2>Asset Circulation Assignment</h2>
+          <div className="flex flex-col gap-6 animate-in fade-in duration-500">
+            <div className="flex gap-4 p-1 bg-slate-100 rounded-2xl w-fit">
+              <button 
+                onClick={() => setCirculationSubTab("issue")}
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all ${
+                  circulationSubTab === "issue" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                🛫 Issue Asset
+              </button>
+              <button 
+                onClick={() => setCirculationSubTab("return")}
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all ${
+                  circulationSubTab === "return" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                🛬 Return Asset
+              </button>
             </div>
-            <div className="p-6 space-y-6">
-              <input 
-                placeholder="Scan Asset Stock ID..." 
-                value={issueSearchVal}
-                onChange={(e) => setIssueSearchVal(e.target.value)}
-                className="input-field font-mono" 
-              />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[320px] overflow-y-auto pr-2">
-                {foundIssueBooks.map(b => (
-                  <div 
-                    key={b.id}
-                    onClick={() => !b.isIssued && setSelectedIssueBook(b)}
-                    className={`p-4 rounded-xl border flex justify-between items-start transition-all relative ${
-                      selectedIssueBook?.id === b.id 
-                        ? 'border-accent bg-blue-50/50 ring-2 ring-accent/20' 
-                        : b.isIssued ? 'opacity-40 grayscale cursor-not-allowed border-surface-border bg-slate-50' : 'cursor-pointer border-surface-border hover:bg-slate-50'
-                    }`}
-                  >
-                    <div>
-                      <div className="font-bold text-sm">📘 {b.title}</div>
-                      <div className="text-[10px] text-text-muted mt-1 underline">STOCK: {b.stocknumber}</div>
-                    </div>
-                    <div className={`text-[10px] font-black tracking-tight ${b.isIssued ? 'text-error' : 'text-emerald-600'}`}>
-                      {b.isIssued ? 'ISSUED' : 'AVAIL'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="pt-4 border-t border-surface-border">
-                <p className="text-[10px] font-bold text-text-muted uppercase mb-2">TARGET MEMBER ASSIGNEE</p>
-                <select 
-                  value={selectedIssueUserPhone} 
-                  onChange={(e) => setSelectedIssueUserPhone(e.target.value)}
-                  className="input-field"
-                >
-                  <option value="">-- Search Profiler --</option>
-                  {members.map(m => (
-                    <option key={m.id} value={m.phone}>{m.name} ({m.phone})</option>
-                  ))}
-                </select>
-              </div>
-              <button onClick={issueBook} className="btn-primary w-full py-4 uppercase font-black text-[11px] tracking-widest shadow-lg active:scale-[0.98]">Execute Assignment Entry</button>
-            </div>
-          </div>
-        )}
 
-        {/* RETURN */}
-        {activeTab === "return" && (
-          <div className="max-w-xl section-card">
-            <div className="section-header">
-              <h2>Library Asset Re-Entry</h2>
-            </div>
-            <div className="p-6 space-y-6">
-              <div className="flex gap-2">
-                <select 
-                  value={returnType} 
-                  onChange={(e) => setReturnType(e.target.value)}
-                  className="bg-slate-100 border border-surface-border px-3 rounded-lg text-xs font-bold"
-                >
-                  <option value="stock">STOCK ID</option>
-                  <option value="bookId">ASSET ID</option>
-                </select>
-                <input 
-                  placeholder="ID scan here..." 
-                  value={returnSearchVal} 
-                  onChange={(e) => setReturnSearchVal(e.target.value)} 
-                  onKeyUp={searchReturnBooks}
-                  className="flex-grow input-field font-mono" 
-                />
-              </div>
-              <div className="space-y-2 max-h-[240px] overflow-y-auto">
-                {foundReturnBooks.map(d => (
-                  <div 
-                    key={d.id}
-                    onClick={() => setSelectedReturnBook(d)}
-                    className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                      selectedReturnBook?.book_id === d.book_id ? 'border-accent bg-blue-50/50' : 'border-surface-border hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="font-bold text-sm">📘 {d.book?.title || "Unknown Asset"}</div>
-                    <div className="text-[10px] text-text-muted mt-1">STOCK: {d.stock_number} | ACCOUNT: {d.user_phone}</div>
+            {circulationSubTab === "issue" ? (
+              <div className="max-w-4xl section-card">
+                <div className="section-header">
+                  <h2 className="text-xl font-black text-slate-800">Asset Circulation Assignment</h2>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Lending Desk Control</p>
+                </div>
+                <div className="p-6 space-y-6">
+                  <input 
+                    placeholder="Scan Asset Stock ID..." 
+                    value={issueSearchVal}
+                    onChange={(e) => setIssueSearchVal(e.target.value)}
+                    className="input-field font-mono" 
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[320px] overflow-y-auto pr-2">
+                    {foundIssueBooks.map(b => (
+                      <div 
+                        key={b.id}
+                        onClick={() => !b.isIssued && setSelectedIssueBook(b)}
+                        className={`p-4 rounded-xl border flex justify-between items-start transition-all relative ${
+                          selectedIssueBook?.id === b.id 
+                            ? 'border-accent bg-blue-50/50 ring-2 ring-accent/20' 
+                            : b.isIssued ? 'opacity-40 grayscale cursor-not-allowed border-surface-border bg-slate-50' : 'cursor-pointer border-surface-border hover:bg-slate-50'
+                        }`}
+                      >
+                        <div>
+                          <div className="font-bold text-sm">📘 {b.title}</div>
+                          <div className="text-[10px] text-text-muted mt-1 underline">STOCK: {b.stocknumber}</div>
+                        </div>
+                        <div className={`text-[10px] font-black tracking-tight ${b.isIssued ? 'text-error' : 'text-emerald-600'}`}>
+                          {b.isIssued ? 'ISSUED' : 'AVAIL'}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                  <div className="pt-4 border-t border-surface-border">
+                    <p className="text-[10px] font-bold text-text-muted uppercase mb-2">TARGET MEMBER ASSIGNEE</p>
+                    <select 
+                      value={selectedIssueUserPhone} 
+                      onChange={(e) => setSelectedIssueUserPhone(e.target.value)}
+                      className="input-field"
+                    >
+                      <option value="">-- Search Profiler --</option>
+                      {members.map(m => (
+                        <option key={m.id} value={m.phone}>{m.name} ({m.phone})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button onClick={issueBook} className="bg-primary text-white w-full py-4 rounded-2xl uppercase font-black text-[11px] tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">Execute Assignment Entry</button>
+                </div>
               </div>
-              <button onClick={returnBook} className="btn-primary w-full py-4 text-[11px] font-black uppercase tracking-widest shadow-blue-500/20 active:scale-[0.98]">Verify & Clear Log</button>
-            </div>
+            ) : (
+              <div className="max-w-xl section-card">
+                <div className="section-header">
+                  <h2 className="text-xl font-black text-slate-800">Library Asset Re-Entry</h2>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Return Processor</p>
+                </div>
+                <div className="p-6 space-y-6">
+                  <div className="flex gap-2">
+                    <select 
+                      value={returnType} 
+                      onChange={(e) => setReturnType(e.target.value)}
+                      className="bg-slate-50 border-2 border-slate-100 px-3 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                    >
+                      <option value="stock">STOCK ID</option>
+                      <option value="bookId">ASSET ID</option>
+                    </select>
+                    <input 
+                      placeholder="ID scan here..." 
+                      value={returnSearchVal} 
+                      onChange={(e) => setReturnSearchVal(e.target.value)} 
+                      onKeyUp={searchReturnBooks}
+                      className="flex-grow input-field font-mono" 
+                    />
+                  </div>
+                  <div className="space-y-2 max-h-[240px] overflow-y-auto">
+                    {foundReturnBooks.map(d => (
+                      <div 
+                        key={d.id}
+                        onClick={() => setSelectedReturnBook(d)}
+                        className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                          selectedReturnBook?.book_id === d.book_id ? 'border-accent bg-blue-50/50' : 'border-surface-border hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="font-bold text-sm text-slate-800">📘 {d.book?.title || "Unknown Asset"}</div>
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tight mt-1">STOCK: {d.stock_number} | ACCOUNT: {d.user_phone}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={returnBook} className="bg-primary text-white w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">Verify & Clear Log</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -4192,6 +4521,7 @@ export default function App() {
                   <tr>
                     <th className="table-header">Asset</th>
                     <th className="table-header">Member</th>
+                    <th className="table-header font-bold uppercase tracking-widest text-[9px]">Project</th>
                     <th className="table-header">Due Date</th>
                     <th className="table-header">Fine</th>
                     <th className="table-header text-right">Status</th>
@@ -4206,6 +4536,11 @@ export default function App() {
                       </td>
                       <td className="table-cell">
                         <button onClick={() => { setViewUserModal(d.user); loadUserHistory(d.user_phone); }} className="text-accent font-bold hover:underline underline-offset-4">{d.user?.name || d.user_phone}</button>
+                      </td>
+                      <td className="table-cell shadow-inner">
+                        <span className={`text-[9px] font-black tracking-widest uppercase px-2 py-1 rounded-md ${d.project === 'Vayanavasantham' ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-500'}`}>
+                          {d.project}
+                        </span>
                       </td>
                       <td className="table-cell font-mono text-xs font-bold text-text-muted">{d.due_date?.split("T")[0]}</td>
                       <td className="table-cell text-error font-black">₹{d.fine}</td>
