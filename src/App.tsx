@@ -1226,18 +1226,17 @@ export default function App() {
 
         const payload: any[] = [];
         const seenPhonesInBatch = new Set<string>();
+        const duplicatesMap = new Map<string, number>(); // Track which numbers appear most
         let duplicateCount = 0;
 
         rows.forEach((row, index) => {
           const keys = Object.keys(row);
           
-          // Smart detection helper
           const getValueByKeywords = (keywords: string[]) => {
             const match = keys.find(k => keywords.some(kw => k.toUpperCase().includes(kw.toUpperCase())));
             return match ? row[match] : null;
           };
 
-          // Normalize fields
           let name = row['FUL NAME'] || row['Full Name'] || row['name'] || row['NAME'] || 
                      getValueByKeywords(['NAME', 'NAM', 'FULLNAME', 'MEMBER']) || "";
           
@@ -1248,20 +1247,21 @@ export default function App() {
           let isIssue = false;
 
           if (!phoneRaw) {
-            finalPhone = `MISSING-${Date.now()}-${index}`;
+            finalPhone = `MISSING-DATA-${index + 1}`;
             missingPhoneCount++;
             isIssue = true;
           } else if (seenPhonesInBatch.has(phoneRaw)) {
-            finalPhone = `${phoneRaw}-DUP-${index}`;
+            finalPhone = `${phoneRaw}-DUP-${index + 1}`;
             duplicateCount++;
             isIssue = true;
+            duplicatesMap.set(phoneRaw, (duplicatesMap.get(phoneRaw) || 1) + 1);
           }
 
           if (phoneRaw) seenPhonesInBatch.add(phoneRaw);
 
-          if (!name || name === "Unknown" || name === "Unknown Member") {
+          if (!name || name === "Unknown" || name === "Incomplete Name Entry") {
             malformedCount++;
-            if (!name || name === "Unknown") name = "Incomplete Name Entry";
+            if (!name || name === "Unknown") name = "UNNAMED ENTRY";
           }
 
           const member_id = row['SERAL NO'] || row['Serial No'] || row['member_id'] || 
@@ -1330,18 +1330,29 @@ export default function App() {
             icon: (missingPhoneCount > 0 || duplicateCount > 0) ? 'warning' : 'success',
             title: 'Registry Sync Finalized',
             html: `
-              <div class="text-left space-y-3 text-xs">
-                <p class="font-bold text-emerald-400">✅ Total Processed: ${payload.length} records</p>
-                <div class="p-3 bg-slate-900/50 rounded-lg space-y-1">
-                  ${missingPhoneCount > 0 ? `<p class="text-amber-400">⚠️ Missing Phones: ${missingPhoneCount} (Tagged as MISSING-*)</p>` : ''}
-                  ${duplicateCount > 0 ? `<p class="text-orange-400">🔁 Duplicates: ${duplicateCount} (Tagged as *-DUP-*)</p>` : ''}
-                  ${malformedCount > 0 ? `<p class="text-blue-300">ℹ️ Incomplete Names: ${malformedCount}</p>` : ''}
+              <div class="text-left space-y-4 text-xs">
+                <div class="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                  <p class="font-bold text-emerald-400">✅ Total Processed: ${payload.length} records</p>
+                  <p class="text-[10px] text-emerald-500/70 mt-1">All entries have been successfully written to the database.</p>
                 </div>
-                <p class="mt-2 text-[10px] opacity-70">All data has been added. Use the "Data Health" filter in the Member Hub to find and edit the tagged records.</p>
+                
+                <div class="p-4 bg-slate-900/80 rounded-xl space-y-2 border border-slate-700">
+                  <p class="text-slate-400 font-bold uppercase tracking-widest text-[9px] mb-2">Audit Logs:</p>
+                  ${missingPhoneCount > 0 ? `<p class="text-amber-400">⚠️ <b>${missingPhoneCount} Missing Phones:</b> Tagged as <i>MISSING-*</i> because no contact number was found in the row.</p>` : ''}
+                  ${duplicateCount > 0 ? `<p class="text-orange-400">🔁 <b>${duplicateCount} Duplicates:</b> Tagged as <i>*-DUP-*</i> because these phone numbers appeared multiple times in your CSV file.</p>` : ''}
+                  ${malformedCount > 0 ? `<p class="text-blue-300">ℹ️ <b>${malformedCount} Incomplete Names:</b> Labeled as <i>UNNAMED ENTRY</i>.</p>` : ''}
+                </div>
+
+                <div class="p-3 bg-primary/5 rounded-lg border border-primary/20">
+                  <p class="font-bold text-primary mb-1">How to Fix:</p>
+                  <p class="opacity-80">Navigate to <b>Member Hub</b> and use the <b>Data Health Scan</b> filter to identify and edit these tagged records one-by-one.</p>
+                </div>
               </div>
             `,
             background: '#0F172A',
-            color: '#fff'
+            color: '#fff',
+            confirmButtonColor: '#3b82f6',
+            confirmButtonText: 'Open Member Hub'
           });
         }
         // Reset file input
