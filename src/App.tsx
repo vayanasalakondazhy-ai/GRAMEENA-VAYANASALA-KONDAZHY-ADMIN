@@ -110,6 +110,7 @@ export default function App() {
   const [voucherSearch, setVoucherSearch] = useState("");
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
   const [isVoucherLoading, setIsVoucherLoading] = useState(false);
+  const [issueMemberSearch, setIssueMemberSearch] = useState("");
   const [circulationSubTab, setCirculationSubTab] = useState<"issue" | "return">("issue");
   const [vayanavasanthamIssued, setVayanavasanthamIssued] = useState<any[]>([]);
   const [vayanavasanthamSubTab, setVayanavasanthamSubTab] = useState<"issue" | "return" | "ledger">("issue");
@@ -706,23 +707,26 @@ export default function App() {
         return;
       }
       if (data) {
-        const filtered = data.filter(u => {
-          const name = (u.name || "").toLowerCase();
-          const phone = (u.phone || "");
-          const searchText = memberSearch.toLowerCase().trim();
-          
-          const matchesSearch = name.includes(searchText) || phone.includes(searchText);
-          const matchesSub = memberFilterSub === "all" || (u.subscription && u.subscription.toUpperCase().includes(memberFilterSub.toUpperCase()));
-          const matchesDate = !memberFilterDate || (u.created_at && u.created_at.startsWith(memberFilterDate));
-          
-          return matchesSearch && matchesSub && matchesDate;
-        });
-        setMembers(filtered);
+        setMembers(data);
       }
     } catch (err) {
       console.error("Unexpected error in loadMembers:", err);
     }
-  }, [memberSearch, memberFilterSub, memberFilterDate]);
+  }, []);
+
+  const filteredMembers = React.useMemo(() => {
+    return members.filter(u => {
+      const name = (u.name || "").toLowerCase();
+      const phone = (u.phone || "");
+      const searchText = memberSearch.toLowerCase().trim();
+      
+      const matchesSearch = name.includes(searchText) || phone.includes(searchText);
+      const matchesSub = memberFilterSub === "all" || (u.subscription && u.subscription.toUpperCase().includes(memberFilterSub.toUpperCase()));
+      const matchesDate = !memberFilterDate || (u.created_at && u.created_at.startsWith(memberFilterDate));
+      
+      return matchesSearch && matchesSub && matchesDate;
+    });
+  }, [members, memberSearch, memberFilterSub, memberFilterDate]);
 
   useEffect(() => {
     loadMembers();
@@ -1014,9 +1018,18 @@ export default function App() {
       setFoundIssueBooks([]);
       return;
     }
-    const { data: booksData } = await supabase.from("books").select("*").ilike("stocknumber", "%" + issueSearchVal + "%");
+    // Search by stocknumber OR title
+    const { data: booksData } = await supabase.from("books")
+      .select("*")
+      .or(`stocknumber.ilike.%${issueSearchVal}%,title.ilike.%${issueSearchVal}%`);
+      
     const { data: issuedData } = await supabase.from("issued_books").select("*");
-    const issuedSet = new Set(issuedData?.map(d => d.book_id));
+    const { data: vvIssuedData } = await supabase.from("vayanavasantham_issued").select("*");
+    
+    const issuedSet = new Set([
+      ...(issuedData?.map(d => d.book_id) || []),
+      ...(vvIssuedData?.map(d => d.book_id) || [])
+    ]);
 
     if (booksData) {
       setFoundIssueBooks(booksData.map(b => ({ ...b, isIssued: issuedSet.has(b.id) })));
@@ -1193,90 +1206,124 @@ export default function App() {
       skipEmptyLines: true,
       complete: async (results) => {
         const rows = results.data as any[];
-        let successCount = 0;
-        let failCount = 0;
+        let missingPhoneCount = 0;
+        let malformedCount = 0;
 
         Swal.fire({
           title: 'Ingesting Registry...',
-          html: '<div class="text-xs font-bold font-mono">Parsing relational book nodes...</div>',
+          html: '<div class="text-xs font-bold font-mono">Calibrating member nodes for batch injection...</div>',
           allowOutsideClick: false,
           didOpen: () => Swal.showLoading()
         });
 
-        for (const row of rows) {
-          try {
-            // Mapping: Timestamp,SERAL NO,FUL NAME,MOB NO,FULL ADDRESS,AGE,DATE OF JOINING,DEPOSIT AMOUNT,REMARKS
-            const name = row['FUL NAME'] || row['Full Name'] || row['name'] || "Unknown";
-            const phone = row['MOB NO'] || row['Mobile'] || row['phone'] || "";
-            const member_id = row['SERAL NO'] || row['Serial No'] || row['member_id'] || `M-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-            const address = row['FULL ADDRESS'] || row['Address'] || "";
-            const joiningDateRaw = row['DATE OF JOINING'] || row['Joining Date'] || row['created_at'];
-            const joiningDate = joiningDateRaw ? new Date(joiningDateRaw).toISOString() : new Date().toISOString();
-            
-            // Age, Deposit, Remarks
-            const ageRaw = row['AGE'] || row['Age'] || row['age'] || "";
-            const depositRaw = row['DEPOSIT AMOUNT'] || row['Deposit'] || row['deposit'] || "";
-            const remarks = row['REMARKS'] || row['Remarks'] || row['remarks'] || "";
-            const notes = `DEPOSIT: ${depositRaw} | REMARKS: ${remarks}`.trim();
+        const userObjects = rows.map((row, index) => {
+          const keys = Object.keys(row);
+          
+          // Smart detection helper
+          const getValueByKeywords = (keywords: string[]) => {
+            const match = keys.find(k => keywords.some(kw => k.toUpperCase().includes(kw.toUpperCase())));
+            return match ? row[match] : null;
+          };
 
-            let subscription = "IMPORTED (LIFETIME)";
-            let expiry_date = new Date(new Date().getFullYear() + 50, 0, 1).toISOString();
-
-            const depositVal = parseInt(depositRaw.toString());
-            if (depositVal === 130) {
-              subscription = "YEARLY (1 Years)";
-              const exp = new Date(joiningDate);
-              exp.setFullYear(exp.getFullYear() + 1);
-              expiry_date = exp.toISOString();
-            } else if ([10, 20, 30, 40, 50, 60, 70, 80, 90].includes(depositVal)) {
-              const months = depositVal / 10;
-              subscription = `MONTHLY (${months} Months)`;
-              const exp = new Date(joiningDate);
-              exp.setMonth(exp.getMonth() + months);
-              expiry_date = exp.toISOString();
-            }
-
-            const userObj = {
-              name,
-              phone,
-              member_id,
-              address,
-              age: ageRaw,
-              notes,
-              subscription,
-              expiry_date,
-              created_at: joiningDate
-            };
-
-            const { error } = await supabase.from("users").insert([userObj]);
-            if (error) failCount++;
-            else successCount++;
-          } catch (err) {
-            failCount++;
+          // Try specific matches first, then keywords
+          let name = row['FUL NAME'] || row['Full Name'] || row['name'] || row['NAME'] || 
+                     getValueByKeywords(['NAME', 'NAM', 'FULLNAME', 'MEMBER']) || "";
+          
+          let phone = (row['MOB NO'] || row['Mobile'] || row['phone'] || row['PHONE'] || 
+                       getValueByKeywords(['PHONE', 'MOB', 'CELL', 'CONTACT']) || "").toString().trim();
+          
+          if (!phone) {
+            missingPhoneCount++;
+            return null;
           }
-        }
 
+          if (!name || name === "Unknown") {
+            // If name is still empty, maybe use Phone as fallback name or record it for the alert
+            malformedCount++;
+            if (!name) name = "Unknown Member";
+          }
+
+          const member_id = row['SERAL NO'] || row['Serial No'] || row['member_id'] || 
+                           getValueByKeywords(['SERIAL', 'SL', 'ID']) || 
+                           `M-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+                           
+          const address = row['FULL ADDRESS'] || row['Address'] || row['address'] || 
+                          getValueByKeywords(['ADDR', 'PLACE', 'LOCATION']) || "";
+                          
+          const joiningDateRaw = row['DATE OF JOINING'] || row['Joining Date'] || row['created_at'] || 
+                                getValueByKeywords(['JOIN', 'DATE', 'TIMESTAMP']);
+                                
+          let joiningDate = new Date().toISOString();
+          try {
+            if (joiningDateRaw) {
+              const parsed = new Date(joiningDateRaw);
+              if (!isNaN(parsed.getTime())) joiningDate = parsed.toISOString();
+            }
+          } catch (e) { }
+          
+          const ageRaw = row['AGE'] || row['Age'] || row['age'] || getValueByKeywords(['AGE']) || "";
+          const depositRaw = row['DEPOSIT AMOUNT'] || row['Deposit'] || row['deposit'] || getValueByKeywords(['DEPOSIT', 'AMT', 'MONEY']) || "0";
+          const remarks = row['REMARKS'] || row['Remarks'] || row['remarks'] || getValueByKeywords(['REMARK', 'NOTE']) || "";
+          const notes = `DEPOSIT: ${depositRaw} | REMARKS: ${remarks}`.trim();
+
+          let subscription = "IMPORTED (LIFETIME)";
+          let expiry_date = new Date(new Date().getFullYear() + 50, 0, 1).toISOString();
+
+          const depositVal = parseInt(depositRaw.toString());
+          if (depositVal === 130) {
+            subscription = "YEARLY (1 Years)";
+            const exp = new Date(joiningDate);
+            exp.setFullYear(exp.getFullYear() + 1);
+            expiry_date = exp.toISOString();
+          } else if ([10, 20, 30, 40, 50, 60, 70, 80, 90].includes(depositVal)) {
+            const months = depositVal / 10;
+            subscription = `MONTHLY (${months} Months)`;
+            const exp = new Date(joiningDate);
+            exp.setMonth(exp.getMonth() + months);
+            expiry_date = exp.toISOString();
+          }
+
+          return {
+            name,
+            phone,
+            member_id,
+            address,
+            age: ageRaw,
+            notes,
+            subscription,
+            expiry_date,
+            created_at: joiningDate
+          };
+        }).filter(Boolean);
+
+        const { error } = await supabase.from("users").upsert(userObjects, { onConflict: 'phone' });
+        
         setIsImporting(false);
         loadMembers();
         loadDashboard();
         
-        Swal.fire({
-          icon: successCount > 0 ? 'success' : 'info',
-          title: 'Import Sequence Finalized',
-          html: `<div class="text-left py-2">
-            <p className="text-xs">Processing statistics:</p>
-            <ul className="text-[10px] mt-2 space-y-1 font-mono uppercase">
-              <li className="text-emerald-500">Node Injected: ${successCount}</li>
-              <li className="text-red-500">Faulty Nodes: ${failCount}</li>
-            </ul>
-          </div>`,
-          background: '#0F172A',
-          color: '#fff'
-        });
+        if (error) {
+          Swal.fire("Bulk Merge Interrupted", `Database error: ${error.message}\n\nHint: Check if your table has restrictive Row-Level Security (RLS) policies.`, "error");
+        } else {
+          Swal.fire({
+            icon: (missingPhoneCount > 0 || malformedCount > 0) ? 'warning' : 'success',
+            title: 'Registry Sync Complete',
+            html: `
+              <div class="text-left space-y-2 text-xs">
+                <p class="font-bold text-emerald-400">✅ Successfully synced: ${userObjects.length} members</p>
+                ${missingPhoneCount > 0 ? `<p class="text-amber-400">⚠️ Skipped: ${missingPhoneCount} (Missing/Blank Phone No)</p>` : ''}
+                ${malformedCount > 0 ? `<p class="text-amber-300">ℹ️ Records with "Unknown" names: ${malformedCount}</p>` : ''}
+                <p class="mt-4 text-[10px] opacity-60">Note: Duplicate phone numbers in the CSV were merged into single entries.</p>
+              </div>
+            `,
+            background: '#0F172A',
+            color: '#fff'
+          });
+        }
+        // Reset file input
+        e.target.value = '';
       }
     });
-    // Reset file input
-    e.target.value = '';
   };
 
   const addBook = async (e: FormEvent) => {
@@ -1981,7 +2028,7 @@ export default function App() {
   };
 
   const exportToCSV = () => {
-    const csv = Papa.unparse(members);
+    const csv = Papa.unparse(filteredMembers);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
@@ -2794,7 +2841,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {members.length === 0 ? (
+                      {filteredMembers.length === 0 ? (
                         <tr>
                           <td colSpan={3} className="px-8 py-20 text-center">
                             <div className="flex flex-col items-center gap-4 opacity-30">
@@ -2813,7 +2860,7 @@ export default function App() {
                           </td>
                         </tr>
                       ) : (
-                        members.map((u, idx) => (
+                        filteredMembers.map((u, idx) => (
                           <motion.tr 
                             key={u.id || idx} 
                             initial={{ opacity: 0, x: -10 }}
@@ -3644,18 +3691,36 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  <div className="pt-4 border-t border-surface-border">
-                    <p className="text-[10px] font-bold text-text-muted uppercase mb-2">TARGET HOUSEHOLD (Member)</p>
-                    <select 
-                      value={selectedIssueUserPhone} 
-                      onChange={(e) => setSelectedIssueUserPhone(e.target.value)}
-                      className="input-field"
-                    >
-                      <option value="">-- Select Member Account --</option>
-                      {members.map(m => (
-                        <option key={m.id} value={m.phone}>{m.name} ({m.phone})</option>
-                      ))}
-                    </select>
+                  <div className="pt-4 border-t border-surface-border space-y-2">
+                    <p className="text-[10px] font-bold text-text-muted uppercase mb-1">TARGET HOUSEHOLD (Member)</p>
+                    <div className="flex gap-2">
+                      <div className="relative flex-grow">
+                        <input 
+                          type="text"
+                          placeholder="Search households..."
+                          value={issueMemberSearch}
+                          onChange={(e) => setIssueMemberSearch(e.target.value)}
+                          className="input-field pl-8"
+                        />
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                      </div>
+                      <select 
+                        value={selectedIssueUserPhone} 
+                        onChange={(e) => setSelectedIssueUserPhone(e.target.value)}
+                        className="input-field min-w-[200px]"
+                      >
+                        <option value="">-- Select Account --</option>
+                        {members
+                          .filter(m => 
+                            (m.name || "").toLowerCase().includes(issueMemberSearch.toLowerCase()) || 
+                            (m.phone || "").includes(issueMemberSearch)
+                          )
+                          .map(m => (
+                            <option key={m.id} value={m.phone}>{m.name} ({m.phone})</option>
+                          ))
+                        }
+                      </select>
+                    </div>
                   </div>
                   <button onClick={issueVayanavasanthamBook} className="bg-primary text-white w-full py-4 rounded-2xl uppercase font-black text-[11px] tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">Record Delivery Dispatch</button>
                 </div>
@@ -4304,18 +4369,36 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  <div className="pt-4 border-t border-surface-border">
-                    <p className="text-[10px] font-bold text-text-muted uppercase mb-2">TARGET MEMBER ASSIGNEE</p>
-                    <select 
-                      value={selectedIssueUserPhone} 
-                      onChange={(e) => setSelectedIssueUserPhone(e.target.value)}
-                      className="input-field"
-                    >
-                      <option value="">-- Search Profiler --</option>
-                      {members.map(m => (
-                        <option key={m.id} value={m.phone}>{m.name} ({m.phone})</option>
-                      ))}
-                    </select>
+                  <div className="pt-4 border-t border-surface-border space-y-2">
+                    <p className="text-[10px] font-bold text-text-muted uppercase mb-1">TARGET MEMBER ASSIGNEE</p>
+                    <div className="flex gap-2">
+                      <div className="relative flex-grow">
+                        <input 
+                          type="text"
+                          placeholder="Search member by name or phone..."
+                          value={issueMemberSearch}
+                          onChange={(e) => setIssueMemberSearch(e.target.value)}
+                          className="input-field pl-8"
+                        />
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+                      </div>
+                      <select 
+                        value={selectedIssueUserPhone} 
+                        onChange={(e) => setSelectedIssueUserPhone(e.target.value)}
+                        className="input-field min-w-[200px]"
+                      >
+                        <option value="">-- Select Member --</option>
+                        {members
+                          .filter(m => 
+                            (m.name || "").toLowerCase().includes(issueMemberSearch.toLowerCase()) || 
+                            (m.phone || "").includes(issueMemberSearch)
+                          )
+                          .map(m => (
+                            <option key={m.id} value={m.phone}>{m.name} ({m.phone})</option>
+                          ))
+                        }
+                      </select>
+                    </div>
                   </div>
                   <button onClick={issueBook} className="bg-primary text-white w-full py-4 rounded-2xl uppercase font-black text-[11px] tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">Execute Assignment Entry</button>
                 </div>
