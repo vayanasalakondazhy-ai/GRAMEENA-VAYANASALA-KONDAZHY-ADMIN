@@ -67,7 +67,8 @@ export default function App() {
   const [members, setMembers] = useState<any[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
   const [showMemberFilters, setShowMemberFilters] = useState(false);
-  const [memberFilterSub, setMemberFilterSub] = useState("all");
+  const [memberFilterSub, setMemberFilterSub] = useState<"all" | "missing" | "duplicates">("all");
+  const [memberFilterSubTab, setMemberFilterSubTab] = useState("all");
   const [memberFilterDate, setMemberFilterDate] = useState("");
   const [books, setBooks] = useState<any[]>([]);
   const [bookSearch, setBookSearch] = useState("");
@@ -721,12 +722,19 @@ export default function App() {
       const searchText = memberSearch.toLowerCase().trim();
       
       const matchesSearch = name.includes(searchText) || phone.includes(searchText);
-      const matchesSub = memberFilterSub === "all" || (u.subscription && u.subscription.toUpperCase().includes(memberFilterSub.toUpperCase()));
+      const matchesSub = memberFilterSubTab === "all" || (u.subscription && u.subscription.toUpperCase().includes(memberFilterSubTab.toUpperCase()));
       const matchesDate = !memberFilterDate || (u.created_at && u.created_at.startsWith(memberFilterDate));
       
-      return matchesSearch && matchesSub && matchesDate;
+      let matchesHealth = true;
+      if (memberFilterSub === "missing") {
+        matchesHealth = phone.includes("MISSING-");
+      } else if (memberFilterSub === "duplicates") {
+        matchesHealth = phone.includes("-DUP-");
+      }
+      
+      return matchesSearch && matchesSub && matchesDate && matchesHealth;
     });
-  }, [members, memberSearch, memberFilterSub, memberFilterDate]);
+  }, [members, memberSearch, memberFilterSub, memberFilterSubTab, memberFilterDate]);
 
   useEffect(() => {
     loadMembers();
@@ -1216,7 +1224,11 @@ export default function App() {
           didOpen: () => Swal.showLoading()
         });
 
-        const userObjects = rows.map((row, index) => {
+        const payload: any[] = [];
+        const seenPhonesInBatch = new Set<string>();
+        let duplicateCount = 0;
+
+        rows.forEach((row, index) => {
           const keys = Object.keys(row);
           
           // Smart detection helper
@@ -1225,22 +1237,31 @@ export default function App() {
             return match ? row[match] : null;
           };
 
-          // Try specific matches first, then keywords
+          // Normalize fields
           let name = row['FUL NAME'] || row['Full Name'] || row['name'] || row['NAME'] || 
                      getValueByKeywords(['NAME', 'NAM', 'FULLNAME', 'MEMBER']) || "";
           
-          let phone = (row['MOB NO'] || row['Mobile'] || row['phone'] || row['PHONE'] || 
+          let phoneRaw = (row['MOB NO'] || row['Mobile'] || row['phone'] || row['PHONE'] || 
                        getValueByKeywords(['PHONE', 'MOB', 'CELL', 'CONTACT']) || "").toString().trim();
           
-          if (!phone) {
+          let finalPhone = phoneRaw;
+          let isIssue = false;
+
+          if (!phoneRaw) {
+            finalPhone = `MISSING-${Date.now()}-${index}`;
             missingPhoneCount++;
-            return null;
+            isIssue = true;
+          } else if (seenPhonesInBatch.has(phoneRaw)) {
+            finalPhone = `${phoneRaw}-DUP-${index}`;
+            duplicateCount++;
+            isIssue = true;
           }
 
-          if (!name || name === "Unknown") {
-            // If name is still empty, maybe use Phone as fallback name or record it for the alert
+          if (phoneRaw) seenPhonesInBatch.add(phoneRaw);
+
+          if (!name || name === "Unknown" || name === "Unknown Member") {
             malformedCount++;
-            if (!name) name = "Unknown Member";
+            if (!name || name === "Unknown") name = "Incomplete Name Entry";
           }
 
           const member_id = row['SERAL NO'] || row['Serial No'] || row['member_id'] || 
@@ -1264,7 +1285,7 @@ export default function App() {
           const ageRaw = row['AGE'] || row['Age'] || row['age'] || getValueByKeywords(['AGE']) || "";
           const depositRaw = row['DEPOSIT AMOUNT'] || row['Deposit'] || row['deposit'] || getValueByKeywords(['DEPOSIT', 'AMT', 'MONEY']) || "0";
           const remarks = row['REMARKS'] || row['Remarks'] || row['remarks'] || getValueByKeywords(['REMARK', 'NOTE']) || "";
-          const notes = `DEPOSIT: ${depositRaw} | REMARKS: ${remarks}`.trim();
+          const notes = `${isIssue ? '[NEEDS REVIEW] ' : ''}DEPOSIT: ${depositRaw} | REMARKS: ${remarks}`.trim();
 
           let subscription = "IMPORTED (LIFETIME)";
           let expiry_date = new Date(new Date().getFullYear() + 50, 0, 1).toISOString();
@@ -1283,9 +1304,9 @@ export default function App() {
             expiry_date = exp.toISOString();
           }
 
-          return {
+          payload.push({
             name,
-            phone,
+            phone: finalPhone,
             member_id,
             address,
             age: ageRaw,
@@ -1293,27 +1314,30 @@ export default function App() {
             subscription,
             expiry_date,
             created_at: joiningDate
-          };
-        }).filter(Boolean);
+          });
+        });
 
-        const { error } = await supabase.from("users").upsert(userObjects, { onConflict: 'phone' });
+        const { error } = await supabase.from("users").upsert(payload, { onConflict: 'phone' });
         
         setIsImporting(false);
         loadMembers();
         loadDashboard();
         
         if (error) {
-          Swal.fire("Bulk Merge Interrupted", `Database error: ${error.message}\n\nHint: Check if your table has restrictive Row-Level Security (RLS) policies.`, "error");
+          Swal.fire("Import Halted", `Database error: ${error.message}`, "error");
         } else {
           Swal.fire({
-            icon: (missingPhoneCount > 0 || malformedCount > 0) ? 'warning' : 'success',
-            title: 'Registry Sync Complete',
+            icon: (missingPhoneCount > 0 || duplicateCount > 0) ? 'warning' : 'success',
+            title: 'Registry Sync Finalized',
             html: `
-              <div class="text-left space-y-2 text-xs">
-                <p class="font-bold text-emerald-400">✅ Successfully synced: ${userObjects.length} members</p>
-                ${missingPhoneCount > 0 ? `<p class="text-amber-400">⚠️ Skipped: ${missingPhoneCount} (Missing/Blank Phone No)</p>` : ''}
-                ${malformedCount > 0 ? `<p class="text-amber-300">ℹ️ Records with "Unknown" names: ${malformedCount}</p>` : ''}
-                <p class="mt-4 text-[10px] opacity-60">Note: Duplicate phone numbers in the CSV were merged into single entries.</p>
+              <div class="text-left space-y-3 text-xs">
+                <p class="font-bold text-emerald-400">✅ Total Processed: ${payload.length} records</p>
+                <div class="p-3 bg-slate-900/50 rounded-lg space-y-1">
+                  ${missingPhoneCount > 0 ? `<p class="text-amber-400">⚠️ Missing Phones: ${missingPhoneCount} (Tagged as MISSING-*)</p>` : ''}
+                  ${duplicateCount > 0 ? `<p class="text-orange-400">🔁 Duplicates: ${duplicateCount} (Tagged as *-DUP-*)</p>` : ''}
+                  ${malformedCount > 0 ? `<p class="text-blue-300">ℹ️ Incomplete Names: ${malformedCount}</p>` : ''}
+                </div>
+                <p class="mt-2 text-[10px] opacity-70">All data has been added. Use the "Data Health" filter in the Member Hub to find and edit the tagged records.</p>
               </div>
             `,
             background: '#0F172A',
@@ -2797,22 +2821,36 @@ export default function App() {
                 </div>
 
                 {showMemberFilters && (
-                  <div className="px-8 py-6 bg-slate-100 border-b border-slate-200 grid grid-cols-3 gap-6 animate-in slide-in-from-top-6 duration-500 z-10 relative">
+                  <div className="px-8 py-6 bg-slate-100 border-b border-slate-200 grid grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500 z-10 relative">
                     <div className="text-left">
-                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2 px-1">Access Tier Filter</label>
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-1 px-1">Access Tier</label>
                       <select 
-                        value={memberFilterSub} 
-                        onChange={(e) => setMemberFilterSub(e.target.value)}
+                        value={memberFilterSubTab} 
+                        onChange={(e) => setMemberFilterSubTab(e.target.value)}
                         className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl text-xs outline-none focus:border-primary transition-all shadow-sm"
                       >
                         <option value="all">ALL PLANS</option>
-                        <option value="MONTHLY">MONTHLY TIER</option>
-                        <option value="YEARLY">YEARLY TIER</option>
-                        <option value="LIFETIME">LIFETIME TIER</option>
+                        <option value="MONTHLY">MONTHLY</option>
+                        <option value="YEARLY">YEARLY</option>
+                        <option value="LIFETIME">LIFETIME</option>
                       </select>
                     </div>
                     <div className="text-left">
-                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-2 px-1">Registry Enrollment Date</label>
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-1 px-1">Data Health Scan</label>
+                      <select 
+                        value={memberFilterSub} 
+                        onChange={(e) => setMemberFilterSub(e.target.value as any)}
+                        className={`w-full px-4 py-3 border-2 rounded-xl text-xs outline-none transition-all shadow-sm ${
+                          memberFilterSub === 'all' ? 'bg-white border-slate-100' : 'bg-amber-50 border-amber-300 text-amber-900 font-bold'
+                        }`}
+                      >
+                        <option value="all">✅ ALL RELIABLE RECORDS</option>
+                        <option value="missing">⚠️ MISSING CONTACT INFO</option>
+                        <option value="duplicates">🔁 DUPLICATE ENTRIES</option>
+                      </select>
+                    </div>
+                    <div className="text-left">
+                      <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-1 px-1">Enrollment Date</label>
                       <input 
                         type="date" 
                         value={memberFilterDate} 
@@ -2822,10 +2860,10 @@ export default function App() {
                     </div>
                     <div className="flex items-end">
                       <button 
-                        onClick={() => { setMemberSearch(""); setMemberFilterSub("all"); setMemberFilterDate(""); }}
+                        onClick={() => { setMemberSearch(""); setMemberFilterSub("all"); setMemberFilterSubTab("all"); setMemberFilterDate(""); }}
                         className="w-full py-3 bg-slate-200 text-slate-500 font-black text-[10px] uppercase rounded-xl hover:bg-slate-300 transition-all shadow-sm tracking-[0.2em]"
                       >
-                        PURGE LOGIC 🔄
+                        RESET DASHBOARD 🔄
                       </button>
                     </div>
                   </div>
@@ -2851,10 +2889,10 @@ export default function App() {
                                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter mt-1">No profiles match the current filter parameters</p>
                               </div>
                               <button 
-                                onClick={() => { setMemberSearch(""); setMemberFilterSub("all"); setMemberFilterDate(""); }}
+                                onClick={() => { setMemberSearch(""); setMemberFilterSub("all"); setMemberFilterSubTab("all"); setMemberFilterDate(""); }}
                                 className="mt-4 px-6 py-2 bg-slate-900 text-white rounded-full text-[9px] font-black uppercase tracking-widest hover:scale-105 transition-all"
                               >
-                                RESET FILTERS
+                                RESET SCANNER
                               </button>
                             </div>
                           </td>
@@ -2866,16 +2904,28 @@ export default function App() {
                             initial={{ opacity: 0, x: -10 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: idx * 0.03 }}
-                            className="group hover:bg-slate-50/50 transition-all duration-300"
+                            className={`group hover:bg-slate-50/50 transition-all duration-300 ${
+                              (u.phone?.includes('MISSING-') || u.phone?.includes('-DUP-')) ? 'bg-amber-50/50' : ''
+                            }`}
                           >
                           <td className="px-8 py-6">
                             <div className="flex items-center gap-4">
-                              <div className="w-12 h-12 bg-slate-100 rounded-[18px] flex items-center justify-center text-lg font-black text-slate-400 group-hover:bg-primary group-hover:text-white group-hover:rotate-12 group-hover:scale-110 transition-all shadow-sm">
+                              <div className={`w-12 h-12 rounded-[18px] flex items-center justify-center text-lg font-black transition-all shadow-sm ${
+                                u.phone?.includes('MISSING-') ? 'bg-amber-100 text-amber-600' : 
+                                u.phone?.includes('-DUP-') ? 'bg-orange-100 text-orange-600' : 
+                                'bg-slate-100 text-slate-400 group-hover:bg-primary group-hover:text-white group-hover:rotate-12 group-hover:scale-110'
+                              }`}>
                                 {u.name?.[0].toUpperCase()}
                               </div>
                               <div className="text-left">
                                 <div className="font-black text-slate-800 group-hover:text-primary transition-colors text-base tracking-tight cursor-pointer" onClick={() => { setViewUserModal(u); loadUserHistory(u.phone); }}>{u.name}</div>
-                                <div className="text-[11px] text-slate-400 font-mono tracking-widest mt-0.5">{u.phone}</div>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <div className="text-[11px] text-slate-400 font-mono tracking-widest leading-none">
+                                    {u.phone?.includes('MISSING-') ? 'PENDING_CONTACT_INFO' : u.phone?.split('-DUP-')[0]}
+                                  </div>
+                                  {u.phone?.includes('MISSING-') && <span className="text-[9px] px-1.5 py-0.5 bg-amber-200 text-amber-700 rounded-md font-black uppercase tracking-tighter">DATA EXCEPTION</span>}
+                                  {u.phone?.includes('-DUP-') && <span className="text-[9px] px-1.5 py-0.5 bg-orange-200 text-orange-700 rounded-md font-black uppercase tracking-tighter">CONFLICT</span>}
+                                </div>
                               </div>
                             </div>
                           </td>
