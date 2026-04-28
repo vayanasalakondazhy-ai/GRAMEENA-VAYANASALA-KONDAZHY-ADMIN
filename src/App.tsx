@@ -5,11 +5,12 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, LineChart, Line, Legend 
+  PieChart, Pie, Cell, LineChart, Line, Legend, AreaChart, Area 
 } from "recharts";
 import { Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Papa from "papaparse";
+import { QRCodeSVG } from 'qrcode.react';
 import Sanscript from "sanscript";
 
 // Supabase Client
@@ -89,6 +90,81 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  const verifyBook = async (stocknumber: string) => {
+    const { error } = await supabase
+      .from("books")
+      .update({ notes: `PHYSICAL_AUDIT_VERIFIED_${new Date().toISOString()}` })
+      .eq("stocknumber", stocknumber);
+    
+    if (error) {
+      Swal.fire('Audit Failed', error.message, 'error');
+    } else {
+      setAuditStats(prev => ({ ...prev, scanned: prev.scanned + 1 }));
+      setBooks(books.map(b => b.stocknumber === stocknumber ? { ...b, notes: `PHYSICAL_AUDIT_VERIFIED_${new Date().toISOString()}` } : b));
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: 'Asset Verified',
+        showConfirmButton: false,
+        timer: 1000
+      });
+    }
+  };
+
+  const generateReceipt = (t: any) => {
+    Swal.fire({
+      title: 'Official Transaction Receipt',
+      html: `
+        <div id="receipt-content" class="text-left p-6 font-mono border-2 border-slate-900 rounded-2xl bg-slate-50">
+          <div class="text-center border-b pb-4 mb-4">
+            <h4 class="font-black text-lg">VAYANASALA LIBRARY</h4>
+            <p class="text-[10px] uppercase tracking-widest text-slate-500">Transaction ID: ${t.id.slice(0,8).toUpperCase()}</p>
+          </div>
+          <div class="space-y-3">
+            <div class="flex justify-between"><span>DATE:</span> <span>${new Date(t.created_at).toLocaleDateString()}</span></div>
+            <div class="flex justify-between"><span>MEMBER:</span> <span>${t.user_phone}</span></div>
+            <div class="flex justify-between"><span>SERVICE:</span> <span class="uppercase">${t.type}</span></div>
+            <div class="flex justify-between border-t pt-3"><span>TOTAL AMOUNT:</span> <span class="font-black">₹${t.amount}</span></div>
+          </div>
+          <div class="mt-8 text-[9px] text-center italic text-slate-400">
+            This is a computer-generated document. No signature required.
+          </div>
+        </div>
+      `,
+      confirmButtonText: 'Download PDF (Concept)',
+      showCancelButton: true,
+      cancelButtonText: 'Dismiss',
+      confirmButtonColor: '#1e293b'
+    });
+  };
+
+  const printIdCard = () => {
+    const content = document.getElementById('printable-id-card');
+    if (!content) return;
+    
+    const printStyle = `
+      @media print {
+         body * { visibility: hidden; }
+         #printable-id-card, #printable-id-card * { visibility: visible; }
+         #printable-id-card { 
+           position: absolute; 
+           left: 50%; 
+           top: 50%; 
+           transform: translate(-50%, -50%); 
+           width: 85mm; 
+           height: 55mm;
+           border: 1px solid #eee;
+         }
+      }
+    `;
+    const style = document.createElement('style');
+    style.innerHTML = printStyle;
+    document.head.appendChild(style);
+    window.print();
+    document.head.removeChild(style);
+  };
+
   const exportBookHealthReport = () => {
     const tracker = new Map<string, number>();
     books.forEach(b => {
@@ -118,9 +194,12 @@ export default function App() {
     document.body.removeChild(link);
   };
   const [counts, setCounts] = useState({ books: 0, users: 0, issued: 0 });
+  const [members, setMembers] = useState<any[]>([]);
   const [recentTrans, setRecentTrans] = useState<any[]>([]);
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
-  const [members, setMembers] = useState<any[]>([]);
+  const [memberCardModal, setMemberCardModal] = useState<any>(null);
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [auditStats, setAuditStats] = useState({ scanned: 0, missing: 0 });
   const [memberSearch, setMemberSearch] = useState("");
   const [showMemberFilters, setShowMemberFilters] = useState(false);
   const [memberFilterSub, setMemberFilterSub] = useState<"all" | "missing" | "duplicates">("all");
@@ -862,7 +941,7 @@ export default function App() {
       });
       setBooks(processed);
     }
-  }, [bookSearch, searchType, bookFilter]);
+  }, [bookSearch, searchType, bookFilter, isFullScan]);
 
   useEffect(() => {
     if (activeTab === 'books') {
@@ -1116,6 +1195,19 @@ export default function App() {
       if (day && trendMap[day] !== undefined) trendMap[day]++;
     });
     const trendData = Object.entries(trendMap).map(([name, visitors]) => ({ name, visitors }));
+    
+    // Revenue Trend (last 7 days)
+    const revenueMap: Record<string, number> = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      revenueMap[d.toISOString().split("T")[0]] = 0;
+    }
+    transData?.forEach(t => {
+      const day = t.date?.split("T")[0];
+      if (day && revenueMap[day] !== undefined) revenueMap[day] += (t.amount || 0);
+    });
+    const revTrendData = Object.entries(revenueMap).map(([name, amount]) => ({ name, amount }));
 
     // Top Books
     const bookBorrowStats: Record<string, number> = {};
@@ -1140,6 +1232,7 @@ export default function App() {
       subsRevenue,
       categoryData,
       trendData,
+      revTrendData,
       topBooks: Object.entries(bookBorrowStats)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5)
@@ -1702,10 +1795,6 @@ export default function App() {
       loadMembers();
       loadTransactions();
     }
-  };
-
-  const printIdCard = () => {
-    window.print();
   };
 
   const updateBook = async (e: FormEvent) => {
@@ -3016,6 +3105,13 @@ export default function App() {
                       📥 Export
                     </button>
                     <button 
+                      onClick={() => { setIsFullScan(!isFullScan); loadMembers(); }}
+                      className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center gap-2 ${isFullScan ? 'bg-accent text-white animate-pulse' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                      title="Toggle Deep Scan (Slow)"
+                    >
+                      📡 {isFullScan ? 'Deep Scan ON' : 'Standard Scan'}
+                    </button>
+                    <button 
                       onClick={() => setShowMemberFilters(!showMemberFilters)}
                       className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${showMemberFilters ? 'bg-primary text-white scale-105' : 'bg-white text-slate-600 border-2 border-slate-100 hover:border-primary/30'}`}
                     >
@@ -3275,6 +3371,12 @@ export default function App() {
                <div className="flex items-center gap-4">
                   <div className="flex bg-slate-100 p-1 rounded-2xl">
                     <button 
+                      onClick={() => setIsAuditing(!isAuditing)}
+                      className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center gap-2 ${isAuditing ? 'bg-amber-500 text-white animate-pulse' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    >
+                      🛡️ {isAuditing ? 'Auditing Mode Active' : 'Start Audit'}
+                    </button>
+                    <button 
                       onClick={exportBooksToCSV}
                       className="w-[56px] h-[56px] flex items-center justify-center rounded-2xl bg-white border-2 border-slate-100 text-slate-400 hover:text-primary transition-all shadow-sm mr-2"
                       title="Export Books to CSV"
@@ -3300,8 +3402,15 @@ export default function App() {
                       Asset ID
                     </button>
                   </div>
-                  <button 
-                    onClick={() => setShowBookFilters(!showBookFilters)}
+                    <button 
+                      onClick={() => { setIsFullScan(!isFullScan); searchBooks(); }}
+                      className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center gap-2 ${isFullScan ? 'bg-accent text-white shadow-lg' : 'bg-white text-slate-400 border-2 border-slate-100'}`}
+                    >
+                      {isFullScan ? '📡 DEEP SCAN ON' : '📡 DEEP SCAN'}
+                    </button>
+
+                    <button 
+                      onClick={() => setShowBookFilters(!showBookFilters)}
                     className={`w-[56px] h-[56px] flex items-center justify-center rounded-2xl transition-all border-2 ${showBookFilters ? 'bg-amber-100 border-amber-300 text-amber-600 scale-105' : 'bg-white border-slate-100 text-slate-400'}`}
                     title="Advanced Filters"
                   >
@@ -3444,7 +3553,16 @@ export default function App() {
                         </td>
                         <td className="px-6 py-6 text-right font-mono text-[13px] font-black text-slate-500 tabular-nums">₹{b.price || '0.00'}</td>
                          <td className="px-6 py-6 text-right pr-8">
-                            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0">
+                            <div className={`flex justify-end gap-2 ${isAuditing ? 'opacity-100 translate-x-0' : 'opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0'} transition-all transform`}>
+                               {isAuditing && (
+                                 <button 
+                                   onClick={(e) => { e.stopPropagation(); verifyBook(b.stocknumber); }} 
+                                   className={`w-10 h-10 flex items-center justify-center rounded-2xl border transition-all ${b.notes?.includes('PHYSICAL_AUDIT_VERIFIED') && b.notes.includes(new Date().toISOString().split('T')[0]) ? 'bg-emerald-500 border-emerald-600 text-white shadow-lg' : 'bg-white border-slate-200 text-slate-400 hover:bg-emerald-50'}`}
+                                   title="Mark as Physically Verified"
+                                 >
+                                   {b.notes?.includes('PHYSICAL_AUDIT_VERIFIED') && b.notes.includes(new Date().toISOString().split('T')[0]) ? '👌' : '🔍'}
+                                 </button>
+                               )}
                                <button 
                                  onClick={() => {
                                    const next = new Set(verifiedCopies);
@@ -5151,17 +5269,34 @@ export default function App() {
               </div>
 
               <div className="section-card p-6">
-                <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6 border-b pb-4">Gate Traffic Frequency</h3>
-                <div className="h-[260px] w-full">
-                  <ResponsiveContainer>
-                    <BarChart data={reportSummary.trendData}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 700 }} />
-                      <YAxis tick={{ fontSize: 9, fontWeight: 700 }} />
-                      <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', fontSize: '10px', fontStyle: 'bold' }} />
-                      <Bar dataKey="visitors" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6 border-b pb-4">Revenue & Traffic Momentum</h3>
+                <div className="grid grid-cols-1 gap-6">
+                  <div className="h-[200px] w-full">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 text-left">Real-time Traffic (Visitors/Day)</p>
+                    <ResponsiveContainer>
+                      <AreaChart data={reportSummary.trendData}>
+                        <defs>
+                          <linearGradient id="colorVis" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="name" tick={{ fontSize: 8, fontWeight: 700 }} axisLine={false} tickLine={false} />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="visitors" stroke="#3b82f6" fillOpacity={1} fill="url(#colorVis)" strokeWidth={2} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="h-[200px] w-full pt-4 border-t border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 text-left">Revenue Inflow (INR/Day)</p>
+                    <ResponsiveContainer>
+                      <BarChart data={reportSummary.revTrendData}>
+                        <XAxis dataKey="name" tick={{ fontSize: 8, fontWeight: 700 }} axisLine={false} tickLine={false} />
+                        <Tooltip />
+                        <Bar dataKey="amount" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
               </div>
             </div>
@@ -5255,12 +5390,10 @@ export default function App() {
             </div>
           </div>
         )}
-          </motion.div>
-        </AnimatePresence>
-      </div>
-    </main>
-
-      {/* MODALS */}
+      </motion.div>
+    </AnimatePresence>
+  </div>
+</main>
       {lookupLoading && (
         <div className="fixed inset-0 bg-primary/20 backdrop-blur-md flex items-center justify-center z-[100] animate-in fade-in duration-300">
           <div className="bg-white p-10 rounded-3xl shadow-2xl flex flex-col items-center max-w-sm text-center border-2 border-accent/20">
