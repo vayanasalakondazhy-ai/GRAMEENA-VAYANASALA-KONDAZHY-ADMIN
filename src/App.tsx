@@ -73,6 +73,8 @@ export default function App() {
   const [books, setBooks] = useState<any[]>([]);
   const [bookSearch, setBookSearch] = useState("");
   const [searchType, setSearchType] = useState("title");
+  const [bookFilter, setBookFilter] = useState<"all" | "duplicates" | "no-isbn">("all");
+  const [showBookFilters, setShowBookFilters] = useState(false);
   const [issuedBooks, setIssuedBooks] = useState<any[]>([]);
   const [attendance, setAttendance] = useState<any[]>([]);
   const [pastAttendance, setPastAttendance] = useState<any[]>([]);
@@ -757,7 +759,9 @@ export default function App() {
       }
     }
     
-    const { data: booksData } = await query.limit(50).order('id', { ascending: false });
+    // Increase limit for health scans to allow client-side detection
+    const queryLimit = bookFilter !== 'all' ? 1000 : 50;
+    const { data: booksData } = await query.limit(queryLimit).order('id', { ascending: false });
 
     const { data: issuedData } = await supabase.from("issued_books").select("*");
     const { data: vvData } = await supabase.from("vayanavasantham_issued").select("*");
@@ -788,7 +792,35 @@ export default function App() {
       });
       setBooks(processed);
     }
-  }, [bookSearch, searchType]);
+  }, [bookSearch, searchType, bookFilter]);
+
+  useEffect(() => {
+    if (activeTab === 'books') {
+      searchBooks();
+    }
+  }, [activeTab, searchBooks, bookFilter]);
+
+  const filteredBooks = React.useMemo(() => {
+    if (bookFilter === "all") return books;
+    
+    if (bookFilter === "duplicates") {
+      const tracker = new Map<string, number>();
+      books.forEach(b => {
+        const key = `${(b.title || "").toLowerCase().trim()}|${(b.author || "").toLowerCase().trim()}`;
+        tracker.set(key, (tracker.get(key) || 0) + 1);
+      });
+      return books.filter(b => {
+        const key = `${(b.title || "").toLowerCase().trim()}|${(b.author || "").toLowerCase().trim()}`;
+        return (tracker.get(key) || 0) > 1;
+      });
+    }
+
+    if (bookFilter === "no-isbn") {
+      return books.filter(b => !b.isbn || b.isbn.length < 5);
+    }
+
+    return books;
+  }, [books, bookFilter]);
 
   // Issued List
   const loadIssued = useCallback(async () => {
@@ -3054,6 +3086,13 @@ export default function App() {
                       Asset ID
                     </button>
                   </div>
+                  <button 
+                    onClick={() => setShowBookFilters(!showBookFilters)}
+                    className={`w-[56px] h-[56px] flex items-center justify-center rounded-2xl transition-all border-2 ${showBookFilters ? 'bg-amber-100 border-amber-300 text-amber-600 scale-105' : 'bg-white border-slate-100 text-slate-400'}`}
+                    title="Advanced Filters"
+                  >
+                    {showBookFilters ? '❌' : '⚙️'}
+                  </button>
                   <div className="relative group">
                     <input 
                       placeholder={`SEARCH BY ${searchType.toUpperCase()}...`} 
@@ -3075,6 +3114,43 @@ export default function App() {
                </div>
             </motion.header>
 
+            {showBookFilters && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="px-8 py-6 bg-slate-100 border-b border-slate-200 grid grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500 z-10 relative mb-8 rounded-3xl"
+              >
+                <div className="text-left col-span-2">
+                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-1 px-1 text-left">Inventory Health Scan</label>
+                  <select 
+                    value={bookFilter} 
+                    onChange={(e) => setBookFilter(e.target.value as any)}
+                    className={`w-full px-4 py-4 border-2 rounded-xl text-xs outline-none transition-all shadow-sm font-black tracking-widest ${
+                      bookFilter === 'all' ? 'bg-white border-slate-100' : 'bg-red-50 border-red-200 text-red-900'
+                    }`}
+                  >
+                    <option value="all">✅ ALL HEALTHY RECORDS</option>
+                    <option value="duplicates">🔁 DUPLICATE BOOKS (SAME TITLE/AUTHOR)</option>
+                    <option value="no-isbn">⚠️ RECORDS MISSING ISBN</option>
+                  </select>
+                </div>
+                <div className="flex items-end col-span-2">
+                   <div className="p-4 bg-white rounded-2xl border border-slate-200 flex-1 flex items-center justify-between">
+                     <div className="text-left">
+                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Scan Result</p>
+                       <p className="text-sm font-black text-slate-900">{filteredBooks.length} Assets Found</p>
+                     </div>
+                     <button 
+                       onClick={() => { setBookFilter('all'); setShowBookFilters(false); }}
+                       className="px-6 py-2 bg-slate-900 text-white text-[10px] font-black uppercase rounded-xl tracking-widest"
+                     >
+                       Reset
+                     </button>
+                   </div>
+                </div>
+              </motion.div>
+            )}
+
             <div className="section-card bg-white/70 backdrop-blur-md">
               <div className="overflow-x-auto custom-scrollbar">
                 <table className="w-full border-separate border-spacing-0">
@@ -3089,19 +3165,24 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {books.map((b, idx) => (
+                    {filteredBooks.map((b, idx) => (
                       <motion.tr 
                         key={b.id} 
                         initial={{ opacity: 0, y: 5 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: idx * 0.02 }}
-                        className="group hover:bg-slate-50/80 transition-all"
+                        className={`group hover:bg-slate-50/80 transition-all ${bookFilter === 'duplicates' ? 'bg-red-50/30' : ''}`}
                       >
                         <td className="px-6 py-6 text-[11px] font-mono text-slate-400 font-black text-center">{idx + 1}</td>
                       <td className="px-6 py-6" onClick={() => setViewBookModal(b)}>
                           <div className="flex items-center gap-4 group/item cursor-pointer">
                             <div className="flex-1 text-left">
-                              <span className="font-black text-slate-800 text-base tracking-tight group-hover/item:text-primary transition-colors block leading-tight">{b.title}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-black text-slate-800 text-base tracking-tight group-hover/item:text-primary transition-colors block leading-tight">{b.title}</span>
+                                {bookFilter === 'duplicates' && (
+                                  <span className="px-1.5 py-0.5 bg-red-500 text-white text-[8px] font-black rounded uppercase tracking-tighter shadow-sm">DUPLICATE</span>
+                                )}
+                              </div>
                               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1 block italic">{b.author}</span>
                               <div className="mt-2 flex flex-wrap gap-1.5">
                                 <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[9px] font-black uppercase tracking-tighter">{b.category || "General"}</span>
