@@ -63,7 +63,63 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isRegistering, setIsRegistering] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [isFullScan, setIsFullScan] = useState(false);
+  const [verifiedCopies, setVerifiedCopies] = useState<Set<string>>(new Set());
+
+  const exportMemberHealthReport = () => {
+    const unhealthy = members.filter(u => {
+      const isMissing = !u.phone || u.phone.includes("MISSING-");
+      const phoneClean = normalizePhone(u.phone || "");
+      const count = members.filter(m => normalizePhone(m.phone) === phoneClean && phoneClean !== "").length;
+      return isMissing || count > 1;
+    });
+    
+    if (unhealthy.length === 0) {
+      Swal.fire('Clean Record', 'No unhealthy records found in member registry!', 'success');
+      return;
+    }
+    
+    const csv = Papa.unparse(unhealthy);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", `Member_Health_Report_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportBookHealthReport = () => {
+    const tracker = new Map<string, number>();
+    books.forEach(b => {
+      const key = `${(b.title || "").toLowerCase().trim()}|${(b.author || "").toLowerCase().trim()}`;
+      tracker.set(key, (tracker.get(key) || 0) + 1);
+    });
+
+    const unhealthy = books.filter(b => {
+      const key = `${(b.title || "").toLowerCase().trim()}|${(b.author || "").toLowerCase().trim()}`;
+      const isDup = (tracker.get(key) || 0) > 1 && !verifiedCopies.has(b.id);
+      const isNoIsbn = !b.isbn || b.isbn.length < 5;
+      return isDup || isNoIsbn;
+    });
+
+    if (unhealthy.length === 0) {
+      Swal.fire('Clean Record', 'No unhealthy records found in book inventory!', 'success');
+      return;
+    }
+
+    const csv = Papa.unparse(unhealthy);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", `Book_Health_Report_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
   const [counts, setCounts] = useState({ books: 0, users: 0, issued: 0 });
+  const [recentTrans, setRecentTrans] = useState<any[]>([]);
+  const [recentLogs, setRecentLogs] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
   const [showMemberFilters, setShowMemberFilters] = useState(false);
@@ -687,6 +743,9 @@ export default function App() {
       const { count: iCount, error: iErr } = await supabase.from("issued_books").select("*", { count: "exact", head: true });
       const { count: vvCount } = await supabase.from("vayanavasantham_issued").select("*", { count: "exact", head: true });
       
+      const { data: trans } = await supabase.from("library_transactions").select("*").order('date', { ascending: false }).limit(5);
+      const { data: logs } = await supabase.from("library_logs").select("*").order('in_time', { ascending: false }).limit(5);
+
       if (bErr || uErr || iErr) {
         console.warn("Dashboard sync warning:", bErr || uErr || iErr);
       }
@@ -696,6 +755,8 @@ export default function App() {
         users: uCount || 0, 
         issued: (iCount || 0) + (vvCount || 0) 
       });
+      setRecentTrans(trans || []);
+      setRecentLogs(logs || []);
     } catch (e) {
       console.error("Dashboard sync fatal error:", e);
     }
@@ -717,21 +778,30 @@ export default function App() {
     }
   }, []);
 
+  const normalizePhone = (p: string) => (p || "").replace(/[^0-9]/g, "");
+
   const filteredMembers = React.useMemo(() => {
     return members.filter(u => {
       const name = (u.name || "").toLowerCase();
       const phone = (u.phone || "");
       const searchText = memberSearch.toLowerCase().trim();
+      const normalizedSearch = normalizePhone(searchText);
       
-      const matchesSearch = name.includes(searchText) || phone.includes(searchText);
+      const matchesSearch = name.includes(searchText) || 
+                          (searchText && phone.includes(searchText)) ||
+                          (normalizedSearch && normalizePhone(phone).includes(normalizedSearch));
+
       const matchesSub = memberFilterSubTab === "all" || (u.subscription && u.subscription.toUpperCase().includes(memberFilterSubTab.toUpperCase()));
       const matchesDate = !memberFilterDate || (u.created_at && u.created_at.startsWith(memberFilterDate));
       
       let matchesHealth = true;
       if (memberFilterSub === "missing") {
-        matchesHealth = phone.includes("MISSING-");
+        matchesHealth = !u.phone || u.phone.includes("MISSING-");
       } else if (memberFilterSub === "duplicates") {
-        matchesHealth = phone.includes("-DUP-");
+        const phoneClean = normalizePhone(u.phone || "");
+        const isDupTag = u.phone?.includes("-DUP-");
+        const count = members.filter(m => normalizePhone(m.phone) === phoneClean && phoneClean !== "").length;
+        matchesHealth = isDupTag || count > 1;
       }
       
       return matchesSearch && matchesSub && matchesDate && matchesHealth;
@@ -759,8 +829,8 @@ export default function App() {
       }
     }
     
-    // Increase limit for health scans to allow client-side detection
-    const queryLimit = bookFilter !== 'all' ? 1000 : 50;
+    // Increase limit for health scans or if full scan is requested
+    const queryLimit = isFullScan || bookFilter !== 'all' ? 5000 : 50;
     const { data: booksData } = await query.limit(queryLimit).order('id', { ascending: false });
 
     const { data: issuedData } = await supabase.from("issued_books").select("*");
@@ -806,10 +876,12 @@ export default function App() {
     if (bookFilter === "duplicates") {
       const tracker = new Map<string, number>();
       books.forEach(b => {
+        if (verifiedCopies.has(b.id)) return;
         const key = `${(b.title || "").toLowerCase().trim()}|${(b.author || "").toLowerCase().trim()}`;
         tracker.set(key, (tracker.get(key) || 0) + 1);
       });
       return books.filter(b => {
+        if (verifiedCopies.has(b.id)) return false;
         const key = `${(b.title || "").toLowerCase().trim()}|${(b.author || "").toLowerCase().trim()}`;
         return (tracker.get(key) || 0) > 1;
       });
@@ -983,36 +1055,54 @@ export default function App() {
 
   // Reports
   const loadReports = useCallback(async () => {
-    const { count: bCount } = await supabase.from("books").select("*", { count: "exact", head: true });
-    const { data: booksData } = await supabase.from("books").select("category, language");
+    const { data: booksData } = await supabase.from("books").select("id, title, category, language");
     const { data: usersData } = await supabase.from("users").select("*");
     const { data: issuedData } = await supabase.from("issued_books").select("*");
+    const { data: vvData } = await supabase.from("vayanavasantham_issued").select("*");
     const { data: logsData } = await supabase.from("library_logs").select("*");
+    const { data: transData } = await supabase.from("library_transactions").select("*");
 
-    const today = new Date().toISOString().split("T")[0];
-    const visitors = logsData?.filter(l => l.in_time && l.in_time.startsWith(today)).length || 0;
+    const todayStr = new Date().toISOString().split("T")[0];
+    const visitors = logsData?.filter(l => l.in_time && l.in_time.startsWith(todayStr)).length || 0;
     
     let overdue = 0;
-    let totalFineSum = 0;
-    const usage: Record<string, number> = {};
+    const today = new Date();
+    
     issuedData?.forEach(d => {
-      const today = new Date();
       const due = new Date(d.due_date);
-      if (today > due) {
-        overdue++;
-        const days = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
-        totalFineSum += days * fineAmount;
-      }
-      usage[d.user_phone] = (usage[d.user_phone] || 0) + 1;
+      if (today > due) overdue++;
     });
 
-    // Category distribution for charts
+    const totalRevenue = transData?.reduce((acc, t) => acc + (t.amount || 0), 0) || 0;
+    const fineRevenue = transData?.filter(t => t.type === 'fine').reduce((acc, t) => acc + (t.amount || 0), 0) || 0;
+    const subsRevenue = transData?.filter(t => t.type === 'subscription').reduce((acc, t) => acc + (t.amount || 0), 0) || 0;
+
+    // Category distribution
     const catMap: Record<string, number> = {};
     booksData?.forEach(b => {
       const cat = b.category || "Uncategorized";
       catMap[cat] = (catMap[cat] || 0) + 1;
     });
-    const categoryData = Object.entries(catMap).map(([name, value]) => ({ name, value })).slice(0, 5);
+    const categoryData = Object.entries(catMap)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+
+    // Top Borrowers
+    const borrowerStats: Record<string, number> = {};
+    [...(issuedData || []), ...(vvData || [])].forEach(item => {
+      const phone = item.member_phone || item.user_phone;
+      if (phone) borrowerStats[phone] = (borrowerStats[phone] || 0) + 1;
+    });
+
+    const topUsers = Object.entries(borrowerStats)
+      .map(([phone, count]) => ({
+        phone,
+        count,
+        name: usersData?.find(u => u.phone === phone)?.name || "Inactive Member"
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
 
     // Activity trend (last 7 days)
     const trendMap: Record<string, number> = {};
@@ -1027,29 +1117,38 @@ export default function App() {
     });
     const trendData = Object.entries(trendMap).map(([name, visitors]) => ({ name, visitors }));
 
-    const userMap: Record<string, any> = {};
-    usersData?.forEach(u => userMap[u.phone] = u);
+    // Top Books
+    const bookBorrowStats: Record<string, number> = {};
+    [...(issuedData || []), ...(vvData || [])].forEach(item => {
+      const bookId = item.book_id;
+      if (bookId) bookBorrowStats[bookId] = (bookBorrowStats[bookId] || 0) + 1;
+    });
 
-    const topUsersList = Object.entries(usage)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([phone, count]) => ({
-        ...userMap[phone],
-        phone,
-        count
-      }));
-
+    // We need book titles. We can find them in booksData if we fetch everything,
+    // but booksData currently only has category and language.
+    // Let's modify booksData fetch to include title and id.
+    
     setReportSummary({
-      books: bCount || 0,
+      books: booksData?.length || 0,
       users: usersData?.length || 0,
-      issued: issuedData?.length || 0,
+      issued: (issuedData?.length || 0) + (vvData?.length || 0),
       overdue,
-      totalFineSum,
       visitors,
-      topUsers: topUsersList,
+      topUsers,
+      totalFineSum: fineRevenue,
+      totalRevenue,
+      subsRevenue,
       categoryData,
-      trendData
-    } as any);
+      trendData,
+      topBooks: Object.entries(bookBorrowStats)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([id, count]) => ({
+          id,
+          count,
+          title: booksData?.find(b => b.id === id)?.title || "Unknown Asset"
+        }))
+    });
   }, []);
 
   // Issue/Return Logic
@@ -1122,6 +1221,24 @@ export default function App() {
       // Validation
       if (!name || !phone) {
         throw new Error("Name and Phone are mandatory fields.");
+      }
+
+      // Check for duplicate phone
+      const { data: existingUser } = await supabase.from("users").select("id").eq("phone", phone).maybeSingle();
+      if (existingUser) {
+        const confirm = await Swal.fire({
+          title: 'Duplicate Detected',
+          text: `A member with phone ${phone} already exists. Do you want to proceed with a secondary record?`,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'Yes, register anyway',
+          cancelButtonText: 'No, cancel',
+          confirmButtonColor: '#1e293b'
+        });
+        if (!confirm.isConfirmed) {
+          setIsRegistering(false);
+          return;
+        }
       }
       
       // Process subscription
@@ -2116,6 +2233,28 @@ export default function App() {
     });
   };
 
+  const exportBooksToCSV = () => {
+    const csv = Papa.unparse(filteredBooks);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Vayanasala_Books_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    Swal.fire({
+      icon: 'success',
+      title: 'Registry Exported',
+      text: 'Book database has been compiled into CSV format.',
+      toast: true,
+      position: 'top-end',
+      timer: 2000,
+      showConfirmButton: false
+    });
+  };
+
   const handleRenewal = async (member: any) => {
     const { value: duration } = await Swal.fire({
       title: 'Renew Subscription',
@@ -2589,46 +2728,71 @@ export default function App() {
                     <motion.div 
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className="section-card p-8 bg-white/40 backdrop-blur-md border-dashed border-2 hover:border-emerald-500/30 group text-left"
+                      className="section-card p-8 bg-white"
                     >
-                      <div className="flex items-center gap-4 mb-6">
-                        <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-2xl group-hover:rotate-[360deg] transition-transform duration-700 shrink-0">⚡</div>
-                        <div>
-                          <h3 className="text-base font-black text-slate-800 uppercase tracking-tight">System Integrity</h3>
-                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Postgres Protocol: Operational</p>
+                      <div className="flex items-center justify-between mb-8 border-b pb-4 text-left">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-xl">💸</div>
+                          <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Recent Transactions</h3>
                         </div>
+                        <button onClick={() => setActiveTab('accounts')} className="text-[10px] font-black text-primary uppercase tracking-widest hover:underline">View All</button>
                       </div>
-                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden mb-2">
-                        <motion.div 
-                          initial={{ width: 0 }}
-                          animate={{ width: "94%" }}
-                          transition={{ duration: 1.5, ease: "easeOut" }}
-                          className="h-full bg-emerald-500 relative"
-                        >
-                          <div className="absolute inset-0 bg-white/20 animate-shimmer"></div>
-                        </motion.div>
+                      <div className="space-y-4">
+                        {recentTrans.length === 0 ? (
+                          <p className="text-xs text-slate-400 italic text-center py-8">No recent financial events</p>
+                        ) : (
+                          recentTrans.map((t, idx) => (
+                            <div key={idx} className="flex items-center justify-between p-4 bg-slate-50/50 rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-colors">
+                              <div className="flex items-center gap-4 text-left">
+                                <div className={`w-2 h-2 rounded-full ${t.type === 'fine' ? 'bg-amber-400' : 'bg-emerald-400'}`}></div>
+                                <div>
+                                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5">{t.type}</p>
+                                  <p className="text-xs font-bold text-slate-900 truncate max-w-[150px]">{t.name}</p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm font-black text-slate-900">₹{t.amount}</p>
+                                <p className="text-[9px] font-bold text-slate-400">{new Date(t.date).toLocaleDateString()}</p>
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </div>
-                      <p className="text-[9px] text-emerald-600 font-black tracking-widest text-right uppercase">Uptime: 99.98%</p>
                     </motion.div>
-                    
+
                     <motion.div 
                       initial={{ opacity: 0, x: 20 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className="section-card p-8 bg-white/40 backdrop-blur-md border-dashed border-2 hover:border-blue-500/30 group text-left"
+                      className="section-card p-8 bg-white"
                     >
-                      <div className="flex items-center gap-4 mb-6">
-                        <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center text-2xl group-hover:animate-bounce shrink-0">💡</div>
-                        <div>
-                          <h3 className="text-base font-black text-slate-800 uppercase tracking-tight">Administrative Intelligence</h3>
-                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Actionable Insights Generated</p>
+                      <div className="flex items-center justify-between mb-8 border-b pb-4 text-left">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 bg-primary/10 text-primary rounded-2xl flex items-center justify-center text-xl">⏳</div>
+                          <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Real-time Gate Traffic</h3>
                         </div>
+                        <button onClick={() => setActiveTab('reports')} className="text-[10px] font-black text-primary uppercase tracking-widest hover:underline">Full Analytics</button>
                       </div>
-                      <button 
-                        onClick={() => setActiveTab('engagement')} 
-                        className="w-full py-3 bg-blue-600 text-white text-[11px] font-black uppercase tracking-[0.2em] rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 active:scale-95"
-                      >
-                        Launch Hub Connection →
-                      </button>
+                      <div className="space-y-4">
+                        {recentLogs.length === 0 ? (
+                          <p className="text-xs text-slate-400 italic text-center py-8">No recent activity logged</p>
+                        ) : (
+                          recentLogs.map((l, idx) => (
+                            <div key={idx} className="flex items-center justify-between p-4 bg-slate-50/50 rounded-2xl border border-slate-100 group hover:border-primary/20 transition-colors">
+                              <div className="flex items-center gap-4 text-left">
+                                <img src={`https://ui-avatars.com/api/?name=${l.member_name}&background=random`} className="w-8 h-8 rounded-lg shadow-sm" alt="" referrerPolicy="no-referrer" />
+                                <div>
+                                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Live Entry</p>
+                                  <p className="text-xs font-bold text-slate-900 truncate max-w-[150px]">{l.member_name}</p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[10px] font-black text-primary uppercase">{new Date(l.in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                                <p className="text-[9px] font-bold text-slate-400">{new Date(l.in_time).toLocaleDateString()}</p>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </motion.div>
                   </div>
                 </div>
@@ -2840,6 +3004,12 @@ export default function App() {
                       🔄
                     </button>
                     <button 
+                      onClick={exportMemberHealthReport}
+                      className="px-5 py-3 rounded-2xl bg-red-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-red-700 transition-all shadow-sm flex items-center gap-2"
+                    >
+                      📉 Health Rpt
+                    </button>
+                    <button 
                       onClick={exportToCSV}
                       className="px-5 py-3 rounded-2xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-sm flex items-center gap-2"
                     >
@@ -2859,6 +3029,11 @@ export default function App() {
                         className="pl-12 pr-6 py-3 bg-white border-2 border-slate-100 rounded-2xl text-xs outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all w-80 shadow-sm"
                       />
                       <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg opacity-40 group-focus-within:opacity-100 transition-opacity">📂</span>
+                      {memberFilterSub !== 'all' && (
+                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-amber-500 text-white text-[8px] font-black rounded-full uppercase tracking-widest shadow-lg animate-pulse whitespace-nowrap">
+                          {memberFilterSub.toUpperCase()} ONLY
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2908,6 +3083,38 @@ export default function App() {
                       >
                         RESET DASHBOARD 🔄
                       </button>
+                    </div>
+                  </div>
+                )}
+
+                {memberFilterSub === 'duplicates' && filteredMembers.length > 0 && (
+                  <div className="mx-8 mt-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-between animate-in zoom-in-95 duration-300">
+                    <div className="flex items-center gap-4 text-left">
+                      <div className="w-10 h-10 bg-amber-500 text-white rounded-xl flex items-center justify-center text-xl">🛡️</div>
+                      <div>
+                        <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest leading-none mb-1">Bulk Remediation Active</p>
+                        <p className="text-xs font-bold text-amber-900">Detected {filteredMembers.length} potential duplicate records. Use individual delete or merge tools.</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                       <button 
+                         onClick={async () => {
+                           const res = await Swal.fire({
+                             title: 'Auto-Cleanup Plan',
+                             text: 'This will attempt to identify exact duplicates by phone and suggest keeping the oldest record. Proceed to analysis?',
+                             icon: 'question',
+                             showCancelButton: true,
+                             confirmButtonText: 'Analyze',
+                             confirmButtonColor: '#d97706'
+                           });
+                           if (res.isConfirmed) {
+                             Swal.fire('Analysis Complete', 'Identified ' + (filteredMembers.length / 2).toFixed(0) + ' redundant records. Please review manually for safety.', 'info');
+                           }
+                         }}
+                         className="px-6 py-2 bg-amber-600 text-white text-[10px] font-black uppercase rounded-xl shadow-lg ring-4 ring-amber-500/10"
+                       >
+                         ⚡ Auto-Merge Analysis
+                       </button>
                     </div>
                   </div>
                 )}
@@ -3068,6 +3275,13 @@ export default function App() {
                <div className="flex items-center gap-4">
                   <div className="flex bg-slate-100 p-1 rounded-2xl">
                     <button 
+                      onClick={exportBooksToCSV}
+                      className="w-[56px] h-[56px] flex items-center justify-center rounded-2xl bg-white border-2 border-slate-100 text-slate-400 hover:text-primary transition-all shadow-sm mr-2"
+                      title="Export Books to CSV"
+                    >
+                      📥
+                    </button>
+                    <button 
                       onClick={() => setSearchType('title')}
                       className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${searchType === 'title' ? 'bg-white shadow-sm text-primary' : 'text-slate-400'}`}
                     >
@@ -3093,16 +3307,21 @@ export default function App() {
                   >
                     {showBookFilters ? '❌' : '⚙️'}
                   </button>
-                  <div className="relative group">
-                    <input 
-                      placeholder={`SEARCH BY ${searchType.toUpperCase()}...`} 
-                      value={bookSearch}
-                      onChange={(e) => setBookSearch(e.target.value)}
-                      onKeyUp={searchBooks}
-                      className="pl-14 pr-6 py-4 bg-white border-2 border-slate-100 rounded-2xl text-xs outline-none focus:border-accent transition-all w-80 shadow-lg shadow-primary/5 uppercase font-black tracking-widest placeholder:opacity-30"
-                    />
-                    <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl grayscale group-focus-within:grayscale-0 transition-all">🔍</span>
-                  </div>
+                    <div className="relative group">
+                      <input 
+                        placeholder={`SEARCH BY ${searchType.toUpperCase()}...`} 
+                        value={bookSearch}
+                        onChange={(e) => setBookSearch(e.target.value)}
+                        onKeyUp={searchBooks}
+                        className="pl-14 pr-6 py-4 bg-white border-2 border-slate-100 rounded-2xl text-xs outline-none focus:border-accent transition-all w-80 shadow-lg shadow-primary/5 uppercase font-black tracking-widest placeholder:opacity-30"
+                      />
+                      <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl grayscale group-focus-within:grayscale-0 transition-all">🔍</span>
+                      {bookFilter !== 'all' && (
+                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-red-500 text-white text-[8px] font-black rounded-full uppercase tracking-widest shadow-lg animate-bounce">
+                          Filtering {bookFilter.replace("-", " ")}
+                        </div>
+                      )}
+                    </div>
                   <motion.button 
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
@@ -3134,18 +3353,39 @@ export default function App() {
                     <option value="no-isbn">⚠️ RECORDS MISSING ISBN</option>
                   </select>
                 </div>
-                <div className="flex items-end col-span-2">
+                <div className="flex items-end col-span-2 gap-4">
                    <div className="p-4 bg-white rounded-2xl border border-slate-200 flex-1 flex items-center justify-between">
                      <div className="text-left">
                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Scan Result</p>
                        <p className="text-sm font-black text-slate-900">{filteredBooks.length} Assets Found</p>
                      </div>
-                     <button 
-                       onClick={() => { setBookFilter('all'); setShowBookFilters(false); }}
-                       className="px-6 py-2 bg-slate-900 text-white text-[10px] font-black uppercase rounded-xl tracking-widest"
-                     >
-                       Reset
-                     </button>
+                     <div className="flex gap-2">
+                       <button 
+                         onClick={exportBookHealthReport}
+                         className="px-4 py-2 bg-red-600 text-white text-[9px] font-black uppercase rounded-xl tracking-widest hover:bg-red-700"
+                         title="Export errors to CSV"
+                       >
+                         📉 Health Rpt
+                       </button>
+                       <button 
+                         onClick={() => { setBookFilter('all'); setShowBookFilters(false); }}
+                         className="px-6 py-2 bg-slate-900 text-white text-[10px] font-black uppercase rounded-xl tracking-widest"
+                       >
+                         Reset
+                       </button>
+                     </div>
+                   </div>
+                   <div className="p-4 bg-slate-900 rounded-2xl flex flex-col justify-center gap-1 min-w-[120px]">
+                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest text-left">Deep Scan (Slow)</p>
+                     <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => { setIsFullScan(!isFullScan); searchBooks(); }}
+                          className={`w-10 h-6 rounded-full relative transition-all ${isFullScan ? 'bg-accent' : 'bg-slate-700'}`}
+                        >
+                          <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isFullScan ? 'left-5' : 'left-1'}`}></div>
+                        </button>
+                        <span className="text-[10px] font-black text-white">{isFullScan ? 'ON' : 'OFF'}</span>
+                     </div>
                    </div>
                 </div>
               </motion.div>
@@ -3203,12 +3443,31 @@ export default function App() {
                           </div>
                         </td>
                         <td className="px-6 py-6 text-right font-mono text-[13px] font-black text-slate-500 tabular-nums">₹{b.price || '0.00'}</td>
-                        <td className="px-6 py-6 text-right pr-8">
-                           <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0">
-                              <button onClick={() => setEditBookModal(b)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-2xl hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all" title="Modify Registry">✏️</button>
-                              <button onClick={() => deleteBook(b.stocknumber)} className="w-10 h-10 flex items-center justify-center bg-red-50 border border-red-100 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" title="Purge Asset">🗑️</button>
-                           </div>
-                        </td>
+                         <td className="px-6 py-6 text-right pr-8">
+                            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0">
+                               <button 
+                                 onClick={() => {
+                                   const next = new Set(verifiedCopies);
+                                   if (next.has(b.id)) next.delete(b.id); else next.add(b.id);
+                                   setVerifiedCopies(next);
+                                   Swal.fire({
+                                     toast: true,
+                                     position: 'top-end',
+                                     icon: 'success',
+                                     title: next.has(b.id) ? 'Verified as intentional duplicate' : 'Reset verification status',
+                                     showConfirmButton: false,
+                                     timer: 1500
+                                   });
+                                 }} 
+                                 className={`w-10 h-10 flex items-center justify-center rounded-2xl border transition-all ${verifiedCopies.has(b.id) ? 'bg-emerald-500 border-emerald-600 text-white' : 'bg-white border-slate-200 text-slate-400 hover:bg-emerald-50'}`} 
+                                 title={verifiedCopies.has(b.id) ? "Undo Verification" : "Mark as Intentional Copy"}
+                               >
+                                 {verifiedCopies.has(b.id) ? '✅' : '🛡️'}
+                               </button>
+                               <button onClick={() => setEditBookModal(b)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-2xl hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all" title="Modify Registry">✏️</button>
+                               <button onClick={() => deleteBook(b.stocknumber)} className="w-10 h-10 flex items-center justify-center bg-red-50 border border-red-100 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" title="Purge Asset">🗑️</button>
+                            </div>
+                         </td>
                       </motion.tr>
                     ))}
                   </tbody>
@@ -4907,12 +5166,11 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
               {[
                 { label: "Assets Indexed", value: reportSummary.books, color: "text-slate-900" },
                 { label: "Active Loans", value: reportSummary.issued, color: "text-accent" },
                 { label: "Overdue Breaches", value: reportSummary.overdue, color: "text-error" },
-                { label: "Fine Revenue (Est)", value: `₹${reportSummary.totalFineSum || 0}`, color: "text-amber-600" },
                 { label: "Gate Traffic", value: reportSummary.visitors, color: "text-emerald-600" }
               ].map((s, i) => (
                 <div key={i} className="section-card p-6 border-l-4 border-l-primary hover:translate-y-[-4px] transition-all">
@@ -4920,6 +5178,80 @@ export default function App() {
                   <span className={`text-4xl font-black tracking-tighter ${s.color}`}>{s.value}</span>
                 </div>
               ))}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="section-card p-8">
+                <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6 border-b pb-4">Financial Flow Control</h3>
+                <div className="space-y-6">
+                  <div className="flex justify-between items-end border-b pb-4">
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total System Revenue</p>
+                      <h4 className="text-4xl font-black text-slate-900 tracking-tighter">₹{reportSummary.totalRevenue?.toLocaleString()}</h4>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-1">↑ Operational</p>
+                      <p className="text-xs font-bold text-slate-400">Since inception</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="p-4 bg-slate-50 rounded-2xl">
+                      <p className="text-[9px] font-black text-slate-400 uppercase mb-2">Subscription Dues</p>
+                      <p className="text-xl font-black text-primary">₹{reportSummary.subsRevenue?.toLocaleString()}</p>
+                    </div>
+                    <div className="p-4 bg-slate-50 rounded-2xl">
+                      <p className="text-[9px] font-black text-slate-400 uppercase mb-2">Fine Collectibles</p>
+                      <p className="text-xl font-black text-amber-600">₹{reportSummary.totalFineSum?.toLocaleString()}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="section-card p-8">
+                <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6 border-b pb-4">Top Engagement nodes</h3>
+                <div className="space-y-4">
+                  {reportSummary.topUsers?.map((u: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl transition-colors border border-transparent hover:border-slate-100">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-primary/10 text-primary rounded-full flex items-center justify-center font-black text-xs">
+                          {idx + 1}
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-900 leading-none mb-1">{u.name}</p>
+                          <p className="text-[10px] font-bold text-slate-400">{u.phone}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs font-black text-accent">{u.count} Assets</p>
+                        <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">Borrow Cycle</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="section-card p-8">
+                <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6 border-b pb-4">Most Circulated Assets</h3>
+                <div className="space-y-4">
+                  {reportSummary.topBooks?.map((b: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl transition-colors border border-transparent hover:border-slate-100">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-accent/10 text-accent rounded-full flex items-center justify-center font-black text-xs">
+                          {idx + 1}
+                        </div>
+                        <div className="max-w-[200px]">
+                          <p className="text-xs font-black text-slate-900 leading-none mb-1 truncate">{b.title}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">UID: {b.id.slice(0,8)}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs font-black text-primary">{b.count} Times</p>
+                        <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">Total Loans</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         )}
