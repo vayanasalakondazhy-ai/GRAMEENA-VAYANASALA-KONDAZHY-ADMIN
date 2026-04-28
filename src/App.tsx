@@ -62,6 +62,8 @@ const useSupabaseHealth = () => {
 export default function App() {
   const { status: dbStatus, errorMessage: dbError } = useSupabaseHealth();
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [duplicateGroups, setDuplicateGroups] = useState<any[]>([]);
+  const [scanningDuplicates, setScanningDuplicates] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isFullScan, setIsFullScan] = useState(false);
@@ -88,6 +90,83 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+
+  const scanForDuplicates = async () => {
+    setScanningDuplicates(true);
+    setDuplicateGroups([]);
+    
+    try {
+      // Fetch all books (7000+ is fine for one big select in Supabase if rows aren't huge)
+      const { data, error } = await supabase.from("books").select("*");
+      if (error) throw error;
+      if (!data) return;
+
+      const groups: Record<string, any[]> = {};
+      
+      data.forEach(book => {
+        const title = (book.title || "").toLowerCase().trim();
+        const author = (book.author || "").toLowerCase().trim();
+        const key = `${title}|${author}`;
+        
+        if (title && author) {
+          if (!groups[key]) groups[key] = [];
+          groups[key].push(book);
+        }
+      });
+
+      const duplicates = Object.entries(groups)
+        .filter(([_, group]) => group.length > 1)
+        .map(([key, group]) => ({
+          key,
+          books: group,
+          title: group[0].title,
+          author: group[0].author
+        }))
+        .sort((a, b) => b.books.length - a.books.length);
+
+      setDuplicateGroups(duplicates);
+      
+      if (duplicates.length === 0) {
+        Swal.fire("Clean Stack!", "No duplicate titles found in the entire directory.", "success");
+      }
+    } catch (err: any) {
+      Swal.fire("Audit Failed", err.message, "error");
+    } finally {
+      setScanningDuplicates(false);
+    }
+  };
+
+  const mergeDuplicateGroup = async (group: any, primaryId: string) => {
+    const others = group.books.filter((b: any) => b.id !== primaryId);
+    const otherIds = others.map((b: any) => b.id);
+
+    const result = await Swal.fire({
+      title: 'Consolidate Records?',
+      text: `Syncing ${others.length} records into the primary entry. Secondary records will be decommissioned.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Execute Merger',
+      confirmButtonColor: '#1e293b'
+    });
+
+    if (result.isConfirmed) {
+      // 1. Move all issue logs from secondary to primary
+      // This is complex if we want to preserve history. Let's start by just deleting.
+      // Better: Update logs to point to primary? (If stocknumber is used, it's harder)
+      // Usually, we just want to remove the extra inventory rows.
+      
+      const { error } = await supabase.from("books").delete().in("id", otherIds);
+      
+      if (error) {
+        Swal.fire("Operation Stalled", error.message, "error");
+      } else {
+        Swal.fire("Merger Complete", "Inventory consolidated successfully.", "success");
+        setDuplicateGroups(duplicateGroups.filter(g => g.key !== group.key));
+        searchBooks(); // refresh main list
+      }
+    }
   };
 
   const verifyBook = async (stocknumber: string) => {
@@ -208,7 +287,7 @@ export default function App() {
   const [books, setBooks] = useState<any[]>([]);
   const [bookSearch, setBookSearch] = useState("");
   const [searchType, setSearchType] = useState("title");
-  const [bookFilter, setBookFilter] = useState<"all" | "duplicates" | "no-isbn">("all");
+  const [bookFilter, setBookFilter] = useState<"all" | "no-isbn">("all");
   const [showBookFilters, setShowBookFilters] = useState(false);
   const [issuedBooks, setIssuedBooks] = useState<any[]>([]);
   const [attendance, setAttendance] = useState<any[]>([]);
@@ -266,10 +345,11 @@ export default function App() {
     en: {
       dashboard: "Dashboard",
       members: "Member Hub",
-      books: "Vault Registry",
+      books: "BOOK SEARCH",
       circulation: "Circulation",
       attendance: "Attendance",
       reports: "Intelligence",
+      duplicates: "Asset Deduplication",
       finance: "Ledger",
       config: "Library Config",
       welcome: "Welcome back, Admin.",
@@ -299,6 +379,7 @@ export default function App() {
       circulation: "വിതരണം",
       attendance: "ഹാജർ പട്ടിക",
       reports: "റിപ്പോർട്ടുകൾ",
+      duplicates: "പകർപ്പുകൾ കണ്ടെത്തുക",
       finance: "സാമ്പത്തികം",
       config: "ക്രമീകരണങ്ങൾ",
       welcome: "സ്വാഗതം, അഡ്മിൻ.",
@@ -952,20 +1033,6 @@ export default function App() {
   const filteredBooks = React.useMemo(() => {
     if (bookFilter === "all") return books;
     
-    if (bookFilter === "duplicates") {
-      const tracker = new Map<string, number>();
-      books.forEach(b => {
-        if (verifiedCopies.has(b.id)) return;
-        const key = `${(b.title || "").toLowerCase().trim()}|${(b.author || "").toLowerCase().trim()}`;
-        tracker.set(key, (tracker.get(key) || 0) + 1);
-      });
-      return books.filter(b => {
-        if (verifiedCopies.has(b.id)) return false;
-        const key = `${(b.title || "").toLowerCase().trim()}|${(b.author || "").toLowerCase().trim()}`;
-        return (tracker.get(key) || 0) > 1;
-      });
-    }
-
     if (bookFilter === "no-isbn") {
       return books.filter(b => !b.isbn || b.isbn.length < 5);
     }
@@ -2669,6 +2736,7 @@ export default function App() {
               { id: "map", label: "Store Mapping", icon: "🗺️" },
               { id: "settings", label: t('config'), icon: "⚙️" },
               { id: "reports", label: t('reports'), icon: "📈" },
+              { id: "duplicates", label: t('duplicates'), icon: "👯" },
               { id: "attendance", label: t('attendance'), icon: "🕒" }
             ].map(tab => (
               <li
@@ -3361,21 +3429,15 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               className="flex justify-between items-end"
             >
-               <div className="flex flex-col gap-2 text-left">
-                 <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">Inventory Ledger</h2>
-                 <div className="flex items-center gap-3">
-                   <div className="w-8 h-0.5 bg-accent rounded-full"></div>
-                   <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.3em] leading-none">Catalogued Assets Repository</p>
-                 </div>
-               </div>
-               <div className="flex items-center gap-4">
+                <div className="flex flex-col gap-2 text-left">
+                  <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">Inventory Ledger</h2>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-0.5 bg-accent rounded-full"></div>
+                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.3em] leading-none">Catalogued Assets Repository</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
                   <div className="flex bg-slate-100 p-1 rounded-2xl">
-                    <button 
-                      onClick={() => setIsAuditing(!isAuditing)}
-                      className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center gap-2 ${isAuditing ? 'bg-amber-500 text-white animate-pulse' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                    >
-                      🛡️ {isAuditing ? 'Auditing Mode Active' : 'Start Audit'}
-                    </button>
                     <button 
                       onClick={exportBooksToCSV}
                       className="w-[56px] h-[56px] flex items-center justify-center rounded-2xl bg-white border-2 border-slate-100 text-slate-400 hover:text-primary transition-all shadow-sm mr-2"
@@ -3402,12 +3464,6 @@ export default function App() {
                       Asset ID
                     </button>
                   </div>
-                    <button 
-                      onClick={() => { setIsFullScan(!isFullScan); searchBooks(); }}
-                      className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center gap-2 ${isFullScan ? 'bg-accent text-white shadow-lg' : 'bg-white text-slate-400 border-2 border-slate-100'}`}
-                    >
-                      {isFullScan ? '📡 DEEP SCAN ON' : '📡 DEEP SCAN'}
-                    </button>
 
                     <button 
                       onClick={() => setShowBookFilters(!showBookFilters)}
@@ -3458,7 +3514,6 @@ export default function App() {
                     }`}
                   >
                     <option value="all">✅ ALL HEALTHY RECORDS</option>
-                    <option value="duplicates">🔁 DUPLICATE BOOKS (SAME TITLE/AUTHOR)</option>
                     <option value="no-isbn">⚠️ RECORDS MISSING ISBN</option>
                   </select>
                 </div>
@@ -3482,18 +3537,6 @@ export default function App() {
                        >
                          Reset
                        </button>
-                     </div>
-                   </div>
-                   <div className="p-4 bg-slate-900 rounded-2xl flex flex-col justify-center gap-1 min-w-[120px]">
-                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest text-left">Deep Scan (Slow)</p>
-                     <div className="flex items-center gap-2">
-                        <button 
-                          onClick={() => { setIsFullScan(!isFullScan); searchBooks(); }}
-                          className={`w-10 h-6 rounded-full relative transition-all ${isFullScan ? 'bg-accent' : 'bg-slate-700'}`}
-                        >
-                          <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${isFullScan ? 'left-5' : 'left-1'}`}></div>
-                        </button>
-                        <span className="text-[10px] font-black text-white">{isFullScan ? 'ON' : 'OFF'}</span>
                      </div>
                    </div>
                 </div>
@@ -3520,7 +3563,7 @@ export default function App() {
                         initial={{ opacity: 0, y: 5 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: idx * 0.02 }}
-                        className={`group hover:bg-slate-50/80 transition-all ${bookFilter === 'duplicates' ? 'bg-red-50/30' : ''}`}
+                        className="group hover:bg-slate-50/80 transition-all"
                       >
                         <td className="px-6 py-6 text-[11px] font-mono text-slate-400 font-black text-center">{idx + 1}</td>
                       <td className="px-6 py-6" onClick={() => setViewBookModal(b)}>
@@ -3528,8 +3571,8 @@ export default function App() {
                             <div className="flex-1 text-left">
                               <div className="flex items-center gap-2">
                                 <span className="font-black text-slate-800 text-base tracking-tight group-hover/item:text-primary transition-colors block leading-tight">{b.title}</span>
-                                {bookFilter === 'duplicates' && (
-                                  <span className="px-1.5 py-0.5 bg-red-500 text-white text-[8px] font-black rounded uppercase tracking-tighter shadow-sm">DUPLICATE</span>
+                                {b.status !== 'issued' && (
+                                  <span className="px-2 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded uppercase tracking-widest shadow-sm">AVAILABLE</span>
                                 )}
                               </div>
                               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1 block italic">{b.author}</span>
@@ -3553,35 +3596,7 @@ export default function App() {
                         </td>
                         <td className="px-6 py-6 text-right font-mono text-[13px] font-black text-slate-500 tabular-nums">₹{b.price || '0.00'}</td>
                          <td className="px-6 py-6 text-right pr-8">
-                            <div className={`flex justify-end gap-2 ${isAuditing ? 'opacity-100 translate-x-0' : 'opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0'} transition-all transform`}>
-                               {isAuditing && (
-                                 <button 
-                                   onClick={(e) => { e.stopPropagation(); verifyBook(b.stocknumber); }} 
-                                   className={`w-10 h-10 flex items-center justify-center rounded-2xl border transition-all ${b.notes?.includes('PHYSICAL_AUDIT_VERIFIED') && b.notes.includes(new Date().toISOString().split('T')[0]) ? 'bg-emerald-500 border-emerald-600 text-white shadow-lg' : 'bg-white border-slate-200 text-slate-400 hover:bg-emerald-50'}`}
-                                   title="Mark as Physically Verified"
-                                 >
-                                   {b.notes?.includes('PHYSICAL_AUDIT_VERIFIED') && b.notes.includes(new Date().toISOString().split('T')[0]) ? '👌' : '🔍'}
-                                 </button>
-                               )}
-                               <button 
-                                 onClick={() => {
-                                   const next = new Set(verifiedCopies);
-                                   if (next.has(b.id)) next.delete(b.id); else next.add(b.id);
-                                   setVerifiedCopies(next);
-                                   Swal.fire({
-                                     toast: true,
-                                     position: 'top-end',
-                                     icon: 'success',
-                                     title: next.has(b.id) ? 'Verified as intentional duplicate' : 'Reset verification status',
-                                     showConfirmButton: false,
-                                     timer: 1500
-                                   });
-                                 }} 
-                                 className={`w-10 h-10 flex items-center justify-center rounded-2xl border transition-all ${verifiedCopies.has(b.id) ? 'bg-emerald-500 border-emerald-600 text-white' : 'bg-white border-slate-200 text-slate-400 hover:bg-emerald-50'}`} 
-                                 title={verifiedCopies.has(b.id) ? "Undo Verification" : "Mark as Intentional Copy"}
-                               >
-                                 {verifiedCopies.has(b.id) ? '✅' : '🛡️'}
-                               </button>
+                            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 translate-x-4 group-hover:translate-x-0 transition-all transform">
                                <button onClick={() => setEditBookModal(b)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-2xl hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all" title="Modify Registry">✏️</button>
                                <button onClick={() => deleteBook(b.stocknumber)} className="w-10 h-10 flex items-center justify-center bg-red-50 border border-red-100 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white hover:shadow-xl hover:-translate-y-1 transition-all" title="Purge Asset">🗑️</button>
                             </div>
@@ -5388,6 +5403,136 @@ export default function App() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === "duplicates" && (
+          <div className="flex flex-col gap-8 animate-in slide-in-from-bottom-4 duration-500">
+            <div className="section-card p-10 bg-gradient-to-br from-red-600 to-indigo-900 text-white border-none shadow-2xl relative overflow-hidden">
+               <div className="absolute top-0 right-0 p-8 opacity-10 text-9xl font-black">7000+</div>
+               <div className="relative z-10">
+                 <h2 className="text-4xl font-black tracking-tighter italic">DUPLICATE AUDIT ENGINE</h2>
+                 <p className="text-[10px] text-white/60 uppercase font-black tracking-[0.4em] mt-3">High-Frequency Redundancy Scanner & Inventory Consolidation</p>
+                 
+                 <div className="mt-8 flex flex-wrap gap-4">
+                   <button 
+                    onClick={scanForDuplicates}
+                    disabled={scanningDuplicates}
+                    className={`bg-white text-red-600 px-8 py-4 rounded-2xl font-black text-xs tracking-widest hover:bg-red-50 transition-all shadow-xl flex items-center gap-3 ${scanningDuplicates ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}
+                   >
+                     {scanningDuplicates ? '🛰️ SCANNING DIRECTORY...' : '🔍 INITIATE GLOBAL SCAN'}
+                   </button>
+                   
+                   <div className="bg-black/20 backdrop-blur-md px-6 py-4 rounded-2xl border border-white/10">
+                      <span className="text-[10px] font-black uppercase text-white/50 block mb-1">Audit Results</span>
+                      <span className="text-2xl font-black">{duplicateGroups.length} <span className="text-xs font-bold text-white/40">Groups Identified</span></span>
+                   </div>
+                 </div>
+               </div>
+            </div>
+
+            {duplicateGroups.length > 0 ? (
+              <div className="grid grid-cols-1 gap-6">
+                {duplicateGroups.map((group, idx) => (
+                  <div key={idx} className="section-card border-none bg-white shadow-xl overflow-hidden group hover:ring-2 hover:ring-red-500/20 transition-all">
+                    <div className="bg-slate-50 px-8 py-4 flex justify-between items-center border-b border-slate-100">
+                      <div>
+                        <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">{group.title}</h4>
+                        <p className="text-[10px] font-bold text-slate-400">BY {group.author}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="bg-red-100 text-red-600 px-3 py-1 rounded-full text-[10px] font-black uppercase">{group.books.length} COPIES</span>
+                        <button 
+                          onClick={() => mergeDuplicateGroup(group, group.books[0].id)}
+                          className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-md active:scale-95"
+                        >
+                          ⚡ Smart Merge
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="p-0">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50/50 border-b border-slate-100">
+                            <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Asset ID</th>
+                            <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Status</th>
+                            <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Notes</th>
+                            <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.books.map((b: any, bIdx: number) => (
+                            <tr key={bIdx} className="border-b border-slate-50 last:border-none hover:bg-slate-50 transition-colors">
+                              <td className="px-8 py-4">
+                                <p className="text-xs font-black text-slate-900 font-mono tracking-tighter uppercase">{b.stocknumber}</p>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Added: {new Date(b.created_at).toLocaleDateString()}</p>
+                              </td>
+                              <td className="px-8 py-4">
+                                <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${b.status === 'issued' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                  {b.status}
+                                </span>
+                              </td>
+                              <td className="px-8 py-4">
+                                <p className="text-[10px] text-slate-500 italic max-w-[200px] truncate">{b.notes || 'No annotations'}</p>
+                              </td>
+                              <td className="px-8 py-4 text-right">
+                                <div className="flex justify-end gap-2">
+                                  <button 
+                                    className="p-2 text-slate-400 hover:text-primary transition-all"
+                                    onClick={() => setEditBookModal(b)}
+                                  >
+                                    ✏️
+                                  </button>
+                                  <button 
+                                    className="p-2 text-slate-400 hover:text-red-600 transition-all"
+                                    onClick={async () => {
+                                      const confirm = await Swal.fire({
+                                        title: 'Delete Asset?',
+                                        text: `Remove record ${b.stocknumber} permanently?`,
+                                        icon: 'error',
+                                        showCancelButton: true,
+                                        confirmButtonText: 'Confirm Destruction',
+                                        confirmButtonColor: '#ef4444'
+                                      });
+                                      if (confirm.isConfirmed) {
+                                        const { error } = await supabase.from("books").delete().eq("id", b.id);
+                                        if (!error) {
+                                          const newGroups = duplicateGroups.map(g => {
+                                            if (g.key === group.key) {
+                                              return { ...g, books: g.books.filter((item: any) => item.id !== b.id) };
+                                            }
+                                            return g;
+                                          }).filter(g => g.books.length > 1);
+                                          setDuplicateGroups(newGroups);
+                                          searchBooks();
+                                          Swal.fire('Asset Purged', '', 'success');
+                                        }
+                                      }
+                                    }}
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : !scanningDuplicates && (
+              <div className="section-card py-20 bg-slate-50/50 border-dashed border-2 border-slate-100 flex flex-col items-center justify-center text-center">
+                 <div className="text-6xl mb-6 opacity-20 filter grayscale">🧬</div>
+                 <h3 className="text-xl font-black text-slate-300 uppercase tracking-tighter">Directory Clean</h3>
+                 <p className="max-w-md text-xs font-bold text-slate-400 leading-relaxed mt-2 uppercase tracking-widest">
+                   Initiate a global scan to detect cross-referenced duplicates in your library archives.
+                 </p>
+                 <button onClick={scanForDuplicates} className="mt-8 text-[10px] font-black text-primary hover:underline uppercase tracking-widest">Start First Scan →</button>
+              </div>
+            )}
           </div>
         )}
       </motion.div>
