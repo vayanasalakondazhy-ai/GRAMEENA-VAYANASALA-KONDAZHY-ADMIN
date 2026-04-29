@@ -68,6 +68,8 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isFullScan, setIsFullScan] = useState(false);
   const [verifiedCopies, setVerifiedCopies] = useState<Set<string>>(new Set());
+  const [bookBatches, setBookBatches] = useState<string[]>([]);
+  const [isUpdatingBatch, setIsUpdatingBatch] = useState(false);
 
   const exportMemberHealthReport = () => {
     const unhealthy = members.filter(u => {
@@ -2333,18 +2335,88 @@ export default function App() {
   const bulkUpload = (e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const batchId = `BATCH-${new Date().getTime()}`;
+
     Papa.parse(file, {
       header: true,
       complete: async (results) => {
         const { data } = results;
-        const { error } = await supabase.from("books").insert(data);
+        // Enrich data with batch tracking in notes
+        const enrichedData = data.map((item: any) => {
+            const existingNotes = item.notes || "";
+            return {
+                ...item,
+                notes: `[${batchId}] ${existingNotes}`.trim()
+            };
+        });
+
+        const { error } = await supabase.from("books").insert(enrichedData);
         if (error) Swal.fire("Upload Failed", error.message, "error");
         else {
-          Swal.fire("Success", `Bulk uploaded ${data.length} assets`, "success");
+          Swal.fire("Success", `Bulk uploaded ${data.length} assets (Batch: ${batchId})`, "success");
           loadDashboard();
+          loadBookBatches();
         }
       }
     });
+  };
+
+  const loadBookBatches = useCallback(async () => {
+    const { data, error } = await supabase.from("books").select("notes");
+    if (error) return;
+    
+    const batches = new Set<string>();
+    data?.forEach(b => {
+      const match = b.notes?.match(/\[(BATCH-\d+)\]/);
+      if (match) batches.add(match[1]);
+    });
+    setBookBatches(Array.from(batches).sort().reverse());
+  }, []);
+
+  const updateBatchShelf = async (batchId: string) => {
+    const { value: shelf } = await Swal.fire({
+      title: 'Bulk Update Shelf Number',
+      text: `Update all assets in batch ${batchId} to a specific shelf.`,
+      input: 'select',
+      inputOptions: Object.fromEntries(Array.from({ length: 30 }, (_, i) => [String(i + 1), `Shelf ${i + 1}`])),
+      inputPlaceholder: 'Select target shelf',
+      showCancelButton: true,
+      confirmButtonText: 'Execute Bulk Update',
+      confirmButtonColor: '#1e293b'
+    });
+
+    if (shelf) {
+      setIsUpdatingBatch(true);
+      try {
+        // We need to update all books where notes contains [batchId]
+        // Since Supabase doesn't support easy 'contains' for update, we fetch IDs first
+        const { data: booksToUpdate, error: fetchError } = await supabase
+          .from("books")
+          .select("stocknumber")
+          .like("notes", `%[${batchId}]%`);
+
+        if (fetchError) throw fetchError;
+
+        if (booksToUpdate && booksToUpdate.length > 0) {
+           const { error: updateError } = await supabase
+             .from("books")
+             .update({ shelfnumber: shelf })
+             .in("stocknumber", booksToUpdate.map(b => b.stocknumber));
+
+           if (updateError) throw updateError;
+           
+           Swal.fire("Updated!", `${booksToUpdate.length} books have been moved to Shelf ${shelf}.`, "success");
+           searchBooks();
+        } else {
+           Swal.fire("No Records", "No books found for this batch reference.", "info");
+        }
+      } catch (err: any) {
+        Swal.fire("Bulk Update Failed", err.message, "error");
+      } finally {
+        setIsUpdatingBatch(false);
+      }
+    }
   };
 
   const handleLostBook = async (book: any) => {
@@ -2505,13 +2577,15 @@ export default function App() {
     loadLibrarySettings();
     fetchVouchers();
     fetchVayanavasanthamIssued();
-  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions, loadLibrarySettings, fetchVouchers, fetchVayanavasanthamIssued]);
+    loadBookBatches();
+  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions, loadLibrarySettings, fetchVouchers, fetchVayanavasanthamIssued, loadBookBatches]);
 
   useEffect(() => {
     if (activeTab === "reports") loadReports();
     if (activeTab === "vouchers") fetchVouchers();
     if (activeTab === "vayanavasantham") fetchVayanavasanthamIssued();
-  }, [activeTab, loadReports, fetchVouchers, fetchVayanavasanthamIssued]);
+    if (activeTab === "duplicates") loadBookBatches();
+  }, [activeTab, loadReports, fetchVouchers, fetchVayanavasanthamIssued, loadBookBatches]);
 
   // Real-time listener
   useEffect(() => {
@@ -3430,7 +3504,7 @@ export default function App() {
               className="flex justify-between items-end"
             >
                 <div className="flex flex-col gap-2 text-left">
-                  <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">Inventory Ledger</h2>
+                  <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">BOOK SEARCH</h2>
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-0.5 bg-accent rounded-full"></div>
                     <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.3em] leading-none">Catalogued Assets Repository</p>
@@ -3465,13 +3539,6 @@ export default function App() {
                     </button>
                   </div>
 
-                    <button 
-                      onClick={() => setShowBookFilters(!showBookFilters)}
-                    className={`w-[56px] h-[56px] flex items-center justify-center rounded-2xl transition-all border-2 ${showBookFilters ? 'bg-amber-100 border-amber-300 text-amber-600 scale-105' : 'bg-white border-slate-100 text-slate-400'}`}
-                    title="Advanced Filters"
-                  >
-                    {showBookFilters ? '❌' : '⚙️'}
-                  </button>
                     <div className="relative group">
                       <input 
                         placeholder={`SEARCH BY ${searchType.toUpperCase()}...`} 
@@ -3481,11 +3548,6 @@ export default function App() {
                         className="pl-14 pr-6 py-4 bg-white border-2 border-slate-100 rounded-2xl text-xs outline-none focus:border-accent transition-all w-80 shadow-lg shadow-primary/5 uppercase font-black tracking-widest placeholder:opacity-30"
                       />
                       <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl grayscale group-focus-within:grayscale-0 transition-all">🔍</span>
-                      {bookFilter !== 'all' && (
-                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-red-500 text-white text-[8px] font-black rounded-full uppercase tracking-widest shadow-lg animate-bounce">
-                          Filtering {bookFilter.replace("-", " ")}
-                        </div>
-                      )}
                     </div>
                   <motion.button 
                     whileHover={{ scale: 1.05 }}
@@ -3497,51 +3559,6 @@ export default function App() {
                   </motion.button>
                </div>
             </motion.header>
-
-            {showBookFilters && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="px-8 py-6 bg-slate-100 border-b border-slate-200 grid grid-cols-4 gap-4 animate-in slide-in-from-top-6 duration-500 z-10 relative mb-8 rounded-3xl"
-              >
-                <div className="text-left col-span-2">
-                  <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest block mb-1 px-1 text-left">Inventory Health Scan</label>
-                  <select 
-                    value={bookFilter} 
-                    onChange={(e) => setBookFilter(e.target.value as any)}
-                    className={`w-full px-4 py-4 border-2 rounded-xl text-xs outline-none transition-all shadow-sm font-black tracking-widest ${
-                      bookFilter === 'all' ? 'bg-white border-slate-100' : 'bg-red-50 border-red-200 text-red-900'
-                    }`}
-                  >
-                    <option value="all">✅ ALL HEALTHY RECORDS</option>
-                    <option value="no-isbn">⚠️ RECORDS MISSING ISBN</option>
-                  </select>
-                </div>
-                <div className="flex items-end col-span-2 gap-4">
-                   <div className="p-4 bg-white rounded-2xl border border-slate-200 flex-1 flex items-center justify-between">
-                     <div className="text-left">
-                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Scan Result</p>
-                       <p className="text-sm font-black text-slate-900">{filteredBooks.length} Assets Found</p>
-                     </div>
-                     <div className="flex gap-2">
-                       <button 
-                         onClick={exportBookHealthReport}
-                         className="px-4 py-2 bg-red-600 text-white text-[9px] font-black uppercase rounded-xl tracking-widest hover:bg-red-700"
-                         title="Export errors to CSV"
-                       >
-                         📉 Health Rpt
-                       </button>
-                       <button 
-                         onClick={() => { setBookFilter('all'); setShowBookFilters(false); }}
-                         className="px-6 py-2 bg-slate-900 text-white text-[10px] font-black uppercase rounded-xl tracking-widest"
-                       >
-                         Reset
-                       </button>
-                     </div>
-                   </div>
-                </div>
-              </motion.div>
-            )}
 
             <div className="section-card bg-white/70 backdrop-blur-md">
               <div className="overflow-x-auto custom-scrollbar">
@@ -3572,7 +3589,7 @@ export default function App() {
                               <div className="flex items-center gap-2">
                                 <span className="font-black text-slate-800 text-base tracking-tight group-hover/item:text-primary transition-colors block leading-tight">{b.title}</span>
                                 {b.status !== 'issued' && (
-                                  <span className="px-2 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded uppercase tracking-widest shadow-sm">AVAILABLE</span>
+                                  <span className="px-2 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded uppercase tracking-widest shadow-sm">(AVAILABLE)</span>
                                 )}
                               </div>
                               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1 block italic">{b.author}</span>
@@ -5408,17 +5425,17 @@ export default function App() {
 
         {activeTab === "duplicates" && (
           <div className="flex flex-col gap-8 animate-in slide-in-from-bottom-4 duration-500">
-            <div className="section-card p-10 bg-gradient-to-br from-red-600 to-indigo-900 text-white border-none shadow-2xl relative overflow-hidden">
+            <div className="section-card p-10 bg-gradient-to-br from-indigo-900 via-slate-900 to-indigo-900 text-white border-none shadow-2xl relative overflow-hidden">
                <div className="absolute top-0 right-0 p-8 opacity-10 text-9xl font-black">7000+</div>
                <div className="relative z-10">
-                 <h2 className="text-4xl font-black tracking-tighter italic">DUPLICATE AUDIT ENGINE</h2>
-                 <p className="text-[10px] text-white/60 uppercase font-black tracking-[0.4em] mt-3">High-Frequency Redundancy Scanner & Inventory Consolidation</p>
+                 <h2 className="text-4xl font-black tracking-tighter italic">ASSET AUDIT CORE</h2>
+                 <p className="text-[10px] text-white/60 uppercase font-black tracking-[0.4em] mt-3">High-Frequency Redundancy Scanner & Batch Operations Hub</p>
                  
                  <div className="mt-8 flex flex-wrap gap-4">
                    <button 
                     onClick={scanForDuplicates}
                     disabled={scanningDuplicates}
-                    className={`bg-white text-red-600 px-8 py-4 rounded-2xl font-black text-xs tracking-widest hover:bg-red-50 transition-all shadow-xl flex items-center gap-3 ${scanningDuplicates ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}
+                    className={`bg-white text-indigo-900 px-8 py-4 rounded-2xl font-black text-xs tracking-widest hover:bg-slate-50 transition-all shadow-xl flex items-center gap-3 ${scanningDuplicates ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}
                    >
                      {scanningDuplicates ? '🛰️ SCANNING DIRECTORY...' : '🔍 INITIATE GLOBAL SCAN'}
                    </button>
@@ -5431,108 +5448,165 @@ export default function App() {
                </div>
             </div>
 
-            {duplicateGroups.length > 0 ? (
-              <div className="grid grid-cols-1 gap-6">
-                {duplicateGroups.map((group, idx) => (
-                  <div key={idx} className="section-card border-none bg-white shadow-xl overflow-hidden group hover:ring-2 hover:ring-red-500/20 transition-all">
-                    <div className="bg-slate-50 px-8 py-4 flex justify-between items-center border-b border-slate-100">
-                      <div>
-                        <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">{group.title}</h4>
-                        <p className="text-[10px] font-bold text-slate-400">BY {group.author}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="bg-red-100 text-red-600 px-3 py-1 rounded-full text-[10px] font-black uppercase">{group.books.length} COPIES</span>
-                        <button 
-                          onClick={() => mergeDuplicateGroup(group, group.books[0].id)}
-                          className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-md active:scale-95"
-                        >
-                          ⚡ Smart Merge
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <div className="p-0">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="bg-slate-50/50 border-b border-slate-100">
-                            <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Asset ID</th>
-                            <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Status</th>
-                            <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Notes</th>
-                            <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400 text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {group.books.map((b: any, bIdx: number) => (
-                            <tr key={bIdx} className="border-b border-slate-50 last:border-none hover:bg-slate-50 transition-colors">
-                              <td className="px-8 py-4">
-                                <p className="text-xs font-black text-slate-900 font-mono tracking-tighter uppercase">{b.stocknumber}</p>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Added: {new Date(b.created_at).toLocaleDateString()}</p>
-                              </td>
-                              <td className="px-8 py-4">
-                                <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${b.status === 'issued' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                                  {b.status}
-                                </span>
-                              </td>
-                              <td className="px-8 py-4">
-                                <p className="text-[10px] text-slate-500 italic max-w-[200px] truncate">{b.notes || 'No annotations'}</p>
-                              </td>
-                              <td className="px-8 py-4 text-right">
-                                <div className="flex justify-end gap-2">
-                                  <button 
-                                    className="p-2 text-slate-400 hover:text-primary transition-all"
-                                    onClick={() => setEditBookModal(b)}
-                                  >
-                                    ✏️
-                                  </button>
-                                  <button 
-                                    className="p-2 text-slate-400 hover:text-red-600 transition-all"
-                                    onClick={async () => {
-                                      const confirm = await Swal.fire({
-                                        title: 'Delete Asset?',
-                                        text: `Remove record ${b.stocknumber} permanently?`,
-                                        icon: 'error',
-                                        showCancelButton: true,
-                                        confirmButtonText: 'Confirm Destruction',
-                                        confirmButtonColor: '#ef4444'
-                                      });
-                                      if (confirm.isConfirmed) {
-                                        const { error } = await supabase.from("books").delete().eq("id", b.id);
-                                        if (!error) {
-                                          const newGroups = duplicateGroups.map(g => {
-                                            if (g.key === group.key) {
-                                              return { ...g, books: g.books.filter((item: any) => item.id !== b.id) };
-                                            }
-                                            return g;
-                                          }).filter(g => g.books.length > 1);
-                                          setDuplicateGroups(newGroups);
-                                          searchBooks();
-                                          Swal.fire('Asset Purged', '', 'success');
-                                        }
-                                      }
-                                    }}
-                                  >
-                                    🗑️
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
+            {/* BATCH REGISTRY MANAGEMENT */}
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between px-2">
+                <div className="text-left">
+                  <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Batch Registry Archives</h3>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Management of bulk-uploaded book collectives</p>
+                </div>
+                <div className="bg-slate-100 px-4 py-2 rounded-xl border border-slate-200">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{bookBatches.length} Batches Registered</span>
+                </div>
               </div>
-            ) : !scanningDuplicates && (
-              <div className="section-card py-20 bg-slate-50/50 border-dashed border-2 border-slate-100 flex flex-col items-center justify-center text-center">
-                 <div className="text-6xl mb-6 opacity-20 filter grayscale">🧬</div>
-                 <h3 className="text-xl font-black text-slate-300 uppercase tracking-tighter">Directory Clean</h3>
-                 <p className="max-w-md text-xs font-bold text-slate-400 leading-relaxed mt-2 uppercase tracking-widest">
-                   Initiate a global scan to detect cross-referenced duplicates in your library archives.
-                 </p>
-                 <button onClick={scanForDuplicates} className="mt-8 text-[10px] font-black text-primary hover:underline uppercase tracking-widest">Start First Scan →</button>
-              </div>
-            )}
+
+              {bookBatches.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {bookBatches.map((batchId) => (
+                    <motion.div 
+                      key={batchId}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="section-card p-6 bg-white border-2 border-slate-100 hover:border-primary/20 transition-all group relative overflow-hidden"
+                    >
+                      <div className="absolute top-0 right-0 p-2 opacity-5 text-4xl group-hover:opacity-10 transition-opacity">📦</div>
+                      <div className="relative z-10 text-left">
+                        <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-2 py-1 rounded uppercase tracking-widest">Active Batch</span>
+                        <h4 className="text-lg font-black text-slate-800 tracking-tighter mt-2">{batchId}</h4>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                          Ref: {new Date(parseInt(batchId.split('-')[1])).toLocaleString()}
+                        </p>
+                        
+                        <div className="mt-6 flex flex-col gap-2">
+                          <button 
+                            onClick={() => updateBatchShelf(batchId)}
+                            className="w-full bg-slate-900 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all flex items-center justify-center gap-2"
+                          >
+                            🏢 Update Shelf Range
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 text-center">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No batch identifiers detected in notes field</p>
+                  <p className="text-[9px] text-slate-400 mt-1">New bulk uploads will be automatically tagged with batch IDs.</p>
+                </div>
+              )}
+            </div>
+
+            {/* DUPLICATE GROUPS SECTION */}
+            <div className="flex flex-col gap-4 mt-4">
+               <div className="text-left px-2">
+                  <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Deduplication Registry</h3>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Identifying redundant asset entries within the global index</p>
+               </div>
+
+               {duplicateGroups.length > 0 ? (
+                 <div className="grid grid-cols-1 gap-6">
+                   {duplicateGroups.map((group, idx) => (
+                     <div key={idx} className="section-card border-none bg-white shadow-xl overflow-hidden group hover:ring-2 hover:ring-red-500/20 transition-all">
+                       <div className="bg-slate-50 px-8 py-4 flex justify-between items-center border-b border-slate-100">
+                         <div>
+                           <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">{group.title}</h4>
+                           <p className="text-[10px] font-bold text-slate-400">BY {group.author}</p>
+                         </div>
+                         <div className="flex items-center gap-2">
+                           <span className="bg-red-100 text-red-600 px-3 py-1 rounded-full text-[10px] font-black uppercase">{group.books.length} COPIES</span>
+                           <button 
+                             onClick={() => mergeDuplicateGroup(group, group.books[0].id)}
+                             className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-md active:scale-95"
+                           >
+                             ⚡ Smart Merge
+                           </button>
+                         </div>
+                       </div>
+                       
+                       <div className="p-0">
+                         <table className="w-full text-left border-collapse">
+                           <thead>
+                             <tr className="bg-slate-50/50 border-b border-slate-100">
+                               <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Asset ID</th>
+                               <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Status</th>
+                               <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Notes</th>
+                               <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400 text-right">Actions</th>
+                             </tr>
+                           </thead>
+                           <tbody>
+                             {group.books.map((b: any, bIdx: number) => (
+                               <tr key={bIdx} className="border-b border-slate-50 last:border-none hover:bg-slate-50 transition-colors">
+                                 <td className="px-8 py-4">
+                                   <p className="text-xs font-black text-slate-900 font-mono tracking-tighter uppercase">{b.stocknumber}</p>
+                                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Added: {new Date(b.created_at).toLocaleDateString()}</p>
+                                 </td>
+                                 <td className="px-8 py-4">
+                                   <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${b.status === 'issued' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                     {b.status}
+                                   </span>
+                                 </td>
+                                 <td className="px-8 py-4">
+                                   <p className="text-[10px] text-slate-500 italic max-w-[200px] truncate">{b.notes || 'No annotations'}</p>
+                                 </td>
+                                 <td className="px-8 py-4 text-right">
+                                   <div className="flex justify-end gap-2">
+                                     <button 
+                                       className="p-2 text-slate-400 hover:text-primary transition-all"
+                                       onClick={() => setEditBookModal(b)}
+                                     >
+                                       ✏️
+                                     </button>
+                                     <button 
+                                       className="p-2 text-slate-400 hover:text-red-600 transition-all"
+                                       onClick={async () => {
+                                         const confirm = await Swal.fire({
+                                           title: 'Delete Asset?',
+                                           text: `Remove record ${b.stocknumber} permanently?`,
+                                           icon: 'error',
+                                           showCancelButton: true,
+                                           confirmButtonText: 'Confirm Destruction',
+                                           confirmButtonColor: '#ef4444'
+                                         });
+                                         if (confirm.isConfirmed) {
+                                           const { error } = await supabase.from("books").delete().eq("id", b.id);
+                                           if (!error) {
+                                             const newGroups = duplicateGroups.map(g => {
+                                               if (g.key === group.key) {
+                                                 return { ...g, books: g.books.filter((item: any) => item.id !== b.id) };
+                                               }
+                                               return g;
+                                             }).filter(g => g.books.length > 1);
+                                             setDuplicateGroups(newGroups);
+                                             searchBooks();
+                                             Swal.fire('Asset Purged', '', 'success');
+                                           }
+                                         }
+                                       }}
+                                     >
+                                       🗑️
+                                     </button>
+                                   </div>
+                                 </td>
+                               </tr>
+                             ))}
+                           </tbody>
+                         </table>
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+               ) : !scanningDuplicates && (
+                 <div className="section-card py-20 bg-slate-50/50 border-dashed border-2 border-slate-100 flex flex-col items-center justify-center text-center">
+                    <div className="text-6xl mb-6 opacity-20 filter grayscale">🧬</div>
+                    <h3 className="text-xl font-black text-slate-300 uppercase tracking-tighter">Directory Clean</h3>
+                    <p className="max-w-md text-xs font-bold text-slate-400 leading-relaxed mt-2 uppercase tracking-widest">
+                      Initiate a global scan to detect cross-referenced duplicates in your library archives.
+                    </p>
+                    <button onClick={scanForDuplicates} className="mt-8 text-[10px] font-black text-primary hover:underline uppercase tracking-widest">Start First Scan →</button>
+                 </div>
+               )}
+            </div>
           </div>
         )}
       </motion.div>
