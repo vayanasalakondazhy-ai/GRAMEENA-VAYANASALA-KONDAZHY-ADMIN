@@ -2342,7 +2342,8 @@ export default function App() {
       header: true,
       complete: async (results) => {
         const { data } = results;
-        // Enrich data with batch tracking in notes
+        
+        // Enrich data with batch tracking in notes column
         const enrichedData = data.map((item: any) => {
             const existingNotes = item.notes || "";
             return {
@@ -2352,9 +2353,10 @@ export default function App() {
         });
 
         const { error } = await supabase.from("books").insert(enrichedData);
-        if (error) Swal.fire("Upload Failed", error.message, "error");
-        else {
-          Swal.fire("Success", `Bulk uploaded ${data.length} assets (Batch: ${batchId})`, "success");
+        if (error) {
+          Swal.fire("Upload Failed", "Ensure you have added the 'notes' column to your Supabase 'books' table. Error: " + error.message, "error");
+        } else {
+          Swal.fire("Success", `Bulk uploaded ${data.length} assets with ID: ${batchId}`, "success");
           loadDashboard();
           loadBookBatches();
         }
@@ -2364,7 +2366,10 @@ export default function App() {
 
   const loadBookBatches = useCallback(async () => {
     const { data, error } = await supabase.from("books").select("notes");
-    if (error) return;
+    if (error) {
+      console.warn("Batch loading requires 'notes' column:", error.message);
+      return;
+    }
     
     const batches = new Set<string>();
     data?.forEach(b => {
@@ -2377,20 +2382,23 @@ export default function App() {
   const updateBatchShelf = async (batchId: string) => {
     const { value: shelf } = await Swal.fire({
       title: 'Bulk Update Shelf Number',
-      text: `Update all assets in batch ${batchId} to a specific shelf.`,
-      input: 'select',
-      inputOptions: Object.fromEntries(Array.from({ length: 30 }, (_, i) => [String(i + 1), `Shelf ${i + 1}`])),
-      inputPlaceholder: 'Select target shelf',
+      text: `Move all books in batch ${batchId} to a specific shelf.`,
+      input: 'number',
+      inputAttributes: {
+        min: '1',
+        max: '100',
+        step: '1'
+      },
+      inputPlaceholder: 'Enter target shelf number',
       showCancelButton: true,
-      confirmButtonText: 'Execute Bulk Update',
+      confirmButtonText: 'Update Entire Batch',
       confirmButtonColor: '#1e293b'
     });
 
     if (shelf) {
       setIsUpdatingBatch(true);
       try {
-        // We need to update all books where notes contains [batchId]
-        // Since Supabase doesn't support easy 'contains' for update, we fetch IDs first
+        // Fetch stocknumbers for books in this batch
         const { data: booksToUpdate, error: fetchError } = await supabase
           .from("books")
           .select("stocknumber")
@@ -2406,10 +2414,10 @@ export default function App() {
 
            if (updateError) throw updateError;
            
-           Swal.fire("Updated!", `${booksToUpdate.length} books have been moved to Shelf ${shelf}.`, "success");
+           Swal.fire("Success", `${booksToUpdate.length} books moved to Shelf ${shelf}.`, "success");
            searchBooks();
         } else {
-           Swal.fire("No Records", "No books found for this batch reference.", "info");
+           Swal.fire("Batch Empty", "No books found with this batch identifier.", "info");
         }
       } catch (err: any) {
         Swal.fire("Bulk Update Failed", err.message, "error");
@@ -5480,9 +5488,10 @@ export default function App() {
                         <div className="mt-6 flex flex-col gap-2">
                           <button 
                             onClick={() => updateBatchShelf(batchId)}
-                            className="w-full bg-slate-900 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all flex items-center justify-center gap-2"
+                            disabled={isUpdatingBatch}
+                            className="w-full bg-slate-900 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                           >
-                            🏢 Update Shelf Range
+                            {isUpdatingBatch ? '⚡ Processing...' : '🏢 Update Shelf for Batch'}
                           </button>
                         </div>
                       </div>
@@ -5492,7 +5501,7 @@ export default function App() {
               ) : (
                 <div className="p-8 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 text-center">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No batch identifiers detected in notes field</p>
-                  <p className="text-[9px] text-slate-400 mt-1">New bulk uploads will be automatically tagged with batch IDs.</p>
+                  <p className="text-[9px] text-slate-400 mt-1">New bulk uploads will be automatically tagged with batch IDs in the 'notes' column.</p>
                 </div>
               )}
             </div>
@@ -5530,7 +5539,7 @@ export default function App() {
                              <tr className="bg-slate-50/50 border-b border-slate-100">
                                <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Asset ID</th>
                                <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Status</th>
-                               <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Notes</th>
+                               <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400">Category</th>
                                <th className="px-8 py-3 text-[9px] font-black uppercase tracking-widest text-slate-400 text-right">Actions</th>
                              </tr>
                            </thead>
@@ -5547,7 +5556,7 @@ export default function App() {
                                    </span>
                                  </td>
                                  <td className="px-8 py-4">
-                                   <p className="text-[10px] text-slate-500 italic max-w-[200px] truncate">{b.notes || 'No annotations'}</p>
+                                   <p className="text-[10px] text-slate-500 font-black uppercase tracking-tighter max-w-[200px] truncate">{b.category || 'General'}</p>
                                  </td>
                                  <td className="px-8 py-4 text-right">
                                    <div className="flex justify-end gap-2">
