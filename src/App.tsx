@@ -351,7 +351,7 @@ export default function App() {
       circulation: "Circulation",
       attendance: "Attendance",
       reports: "Intelligence",
-      duplicates: "Asset Deduplication",
+      duplicates: "Batch Ops & Registry",
       finance: "Ledger",
       config: "Library Config",
       welcome: "Welcome back, Admin.",
@@ -381,7 +381,7 @@ export default function App() {
       circulation: "വിതരണം",
       attendance: "ഹാജർ പട്ടിക",
       reports: "റിപ്പോർട്ടുകൾ",
-      duplicates: "പകർപ്പുകൾ കണ്ടെത്തുക",
+      duplicates: "ബാച്ച് ഓപ്പറേഷൻസ്",
       finance: "സാമ്പത്തികം",
       config: "ക്രമീകരണങ്ങൾ",
       welcome: "സ്വാഗതം, അഡ്മിൻ.",
@@ -2358,16 +2358,21 @@ export default function App() {
         } else {
           Swal.fire("Success", `Bulk uploaded ${data.length} assets with ID: ${batchId}`, "success");
           loadDashboard();
-          loadBookBatches();
+          setTimeout(() => loadBookBatches(), 1000);
         }
       }
     });
   };
 
   const loadBookBatches = useCallback(async () => {
-    const { data, error } = await supabase.from("books").select("notes");
+    const { data, error } = await supabase
+      .from("books")
+      .select("notes")
+      .ilike("notes", "%[BATCH-%")
+      .limit(10000);
+
     if (error) {
-      console.warn("Batch loading requires 'notes' column:", error.message);
+      console.warn("Batch loading failed:", error.message);
       return;
     }
     
@@ -5500,8 +5505,12 @@ export default function App() {
                 </div>
               ) : (
                 <div className="p-8 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 text-center">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No batch identifiers detected in notes field</p>
-                  <p className="text-[9px] text-slate-400 mt-1">New bulk uploads will be automatically tagged with batch IDs in the 'notes' column.</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No active batches detected in registry</p>
+                  <p className="text-[9px] text-slate-400 mt-2 max-w-sm mx-auto leading-relaxed">
+                    System scanning requires a 'notes' column containing identifiers like [BATCH-...] which are automatically added during bulk uploads. 
+                    If you just uploaded, please wait a few seconds and refresh this tab.
+                  </p>
+                  <button onClick={loadBookBatches} className="mt-4 px-6 py-2 bg-white border border-slate-200 text-[10px] font-black uppercase rounded-xl hover:bg-slate-50">Force Re-Scan</button>
                 </div>
               )}
             </div>
