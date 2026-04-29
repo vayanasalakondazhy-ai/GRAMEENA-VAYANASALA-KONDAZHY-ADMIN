@@ -332,13 +332,37 @@ export default function App() {
   const [issueMemberSearch, setIssueMemberSearch] = useState("");
   const [circulationSubTab, setCirculationSubTab] = useState<"issue" | "return">("issue");
   const [vayanavasanthamIssued, setVayanavasanthamIssued] = useState<any[]>([]);
-  const [vayanavasanthamSubTab, setVayanavasanthamSubTab] = useState<"issue" | "return" | "ledger">("issue");
+  const [vayanavasanthamSubTab, setVayanavasanthamSubTab] = useState<"issue" | "return" | "ledger" | "members">("issue");
   const [isVayanavasanthamLoading, setIsVayanavasanthamLoading] = useState(false);
   const [addMode, setAddMode] = useState<"manual" | "barcode">("manual");
   const [isbnLookup, setIsbnLookup] = useState("");
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResults, setLookupResults] = useState<any[]>([]);
   const [scannedBook, setScannedBook] = useState<any>(null);
+  const [vvMembers, setVvMembers] = useState<any[]>([]);
+  const [vvTab, setVvTab] = useState<'loans' | 'members'>('loans');
+  const [showVvRegisterModal, setShowVvRegisterModal] = useState(false);
+
+  const loadVvMembers = useCallback(async () => {
+    const { data, error } = await supabase.from("vayanavasantham_members").select("*").order('created_at', { ascending: false });
+    if (!error && data) setVvMembers(data);
+  }, []);
+
+  const registerVvMember = async (e: FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const memberData = Object.fromEntries(formData.entries());
+
+    const { error } = await supabase.from("vayanavasantham_members").insert([memberData]);
+    if (error) {
+      Swal.fire("Registration Failed", error.message, "error");
+    } else {
+      Swal.fire("Registered!", "Member added to Vayanavasantham project.", "success");
+      setShowVvRegisterModal(false);
+      loadVvMembers();
+    }
+  };
   const [isImporting, setIsImporting] = useState(false);
   const [lang, setLang] = useState<"en" | "ml">("en");
 
@@ -2591,7 +2615,8 @@ export default function App() {
     fetchVouchers();
     fetchVayanavasanthamIssued();
     loadBookBatches();
-  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions, loadLibrarySettings, fetchVouchers, fetchVayanavasanthamIssued, loadBookBatches]);
+    loadVvMembers();
+  }, [loadDashboard, loadMembers, loadIssued, loadTodayAttendance, loadTransactions, loadLibrarySettings, fetchVouchers, fetchVayanavasanthamIssued, loadBookBatches, loadVvMembers]);
 
   useEffect(() => {
     if (activeTab === "reports") loadReports();
@@ -4219,6 +4244,14 @@ export default function App() {
               >
                 📖 Project Ledger
               </button>
+              <button 
+                onClick={() => { setVayanavasanthamSubTab("members"); loadVvMembers(); }}
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all ${
+                  vayanavasanthamSubTab === "members" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                👥 Member Registry
+              </button>
             </div>
 
             {vayanavasanthamSubTab === "issue" && (
@@ -4377,6 +4410,67 @@ export default function App() {
                           </td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {vayanavasanthamSubTab === "members" && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                  <div>
+                    <h3 className="text-xl font-black text-slate-800">Project Members</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Database of registered Vayanavasantham beneficiaries</p>
+                  </div>
+                  <button 
+                    onClick={() => setShowVvRegisterModal(true)}
+                    className="bg-emerald-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-200"
+                  >
+                    Register New Member
+                  </button>
+                </div>
+
+                <div className="section-card bg-white overflow-hidden border-slate-100">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-100">
+                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">ID</th>
+                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Name</th>
+                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Contact</th>
+                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Location/Route</th>
+                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 text-right">Added</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {vvMembers.map((m) => (
+                        <tr key={m.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-6 py-4">
+                            <span className="text-[10px] font-black text-emerald-600 font-mono bg-emerald-50 px-2 py-1 rounded">{m.membership_id}</span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="text-xs font-bold text-slate-800">{m.full_name}</div>
+                            <div className="text-[9px] text-slate-400 font-medium uppercase">{m.job || 'N/A'}</div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="text-xs font-bold text-slate-700">{m.phone}</div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="text-xs text-slate-600">{m.place || '—'}</div>
+                            <div className="text-[10px] font-bold text-slate-400 tracking-tight">{m.route || '—'}</div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="text-[10px] text-slate-400 font-mono">{new Date(m.created_at).toLocaleDateString()}</div>
+                          </td>
+                        </tr>
+                      ))}
+                      {vvMembers.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-20 text-center text-slate-400 font-bold uppercase text-xs tracking-widest bg-slate-50/30">
+                            No project members found
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -5932,6 +6026,84 @@ export default function App() {
               <button onClick={() => setViewUserModal(null)} className="w-full btn-primary py-4 mt-6 uppercase font-black text-[10px] tracking-widest shadow-lg shadow-primary/20">Close Institutional Profile</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* VAYANAVASANTHAM REGISTER MODAL */}
+      {showVvRegisterModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            onClick={() => setShowVvRegisterModal(false)}
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+          />
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            className="bg-white rounded-[40px] shadow-2xl w-full max-w-2xl relative z-10 overflow-hidden border border-slate-100"
+          >
+            <div className="bg-emerald-900 p-8 text-left relative">
+              <div className="absolute top-0 right-0 p-8 opacity-10 text-6xl">☘️</div>
+              <h3 className="text-2xl font-black text-white tracking-tighter leading-tight">VV Project Registration</h3>
+              <p className="text-[10px] text-emerald-200/60 uppercase tracking-widest mt-2 font-bold">Comprehensive Beneficiary Admission Form</p>
+              <button 
+                onClick={() => setShowVvRegisterModal(false)}
+                className="absolute top-6 right-6 w-8 h-8 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-all font-black"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={registerVvMember} className="p-8 grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto">
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Full Name</label>
+                <input name="full_name" required className="input-field" placeholder="Legal Name" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Membership ID</label>
+                <input name="membership_id" required className="input-field font-mono" placeholder="VV-XXXX" />
+              </div>
+              <div className="col-span-full">
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Address</label>
+                <textarea name="address" required className="input-field h-20 py-3" placeholder="Full residential details..." />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Phone Number</label>
+                <input name="phone" required className="input-field" placeholder="Primary Contact" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Age</label>
+                <input name="age" type="number" className="input-field" placeholder="Years" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Educational Qualification</label>
+                <input name="education" className="input-field" placeholder="B.Sc, MA, SSLC, etc" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Job / Occupation</label>
+                <input name="job" className="input-field" placeholder="Profession" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Membership Granted Date</label>
+                <input name="membership_granted_date" type="date" className="input-field" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Place</label>
+                <input name="place" className="input-field" placeholder="Ward / Colony" />
+              </div>
+              <div className="col-span-full">
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Route</label>
+                <input name="route" className="input-field" placeholder="Delivery Route Details" />
+              </div>
+              
+              <div className="col-span-full pt-4">
+                <button type="submit" className="w-full bg-emerald-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-[11px] hover:bg-emerald-800 transition-all shadow-xl shadow-emerald-900/20">
+                  Authorize & Commit Record
+                </button>
+              </div>
+            </form>
+          </motion.div>
         </div>
       )}
 
