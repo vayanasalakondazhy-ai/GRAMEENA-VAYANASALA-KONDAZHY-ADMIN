@@ -12,6 +12,31 @@ import { motion, AnimatePresence } from "motion/react";
 import Papa from "papaparse";
 import { QRCodeSVG } from 'qrcode.react';
 import Sanscript from "sanscript";
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
+
+// Fix for Leaflet default icon issues in React
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+
+let DefaultIcon = L.icon({
+    iconUrl: icon,
+    shadowUrl: iconShadow,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41]
+});
+
+L.Marker.prototype.options.icon = DefaultIcon;
+
+// Helper component for map clicks
+function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
+  useMapEvents({
+    click(e) {
+      onMapClick(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+}
 
 // Supabase Client
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://bfrgzovowzrmnygoxnsn.supabase.co";
@@ -332,7 +357,7 @@ export default function App() {
   const [issueMemberSearch, setIssueMemberSearch] = useState("");
   const [circulationSubTab, setCirculationSubTab] = useState<"issue" | "return">("issue");
   const [vayanavasanthamIssued, setVayanavasanthamIssued] = useState<any[]>([]);
-  const [vayanavasanthamSubTab, setVayanavasanthamSubTab] = useState<"issue" | "return" | "ledger" | "members">("issue");
+  const [vayanavasanthamSubTab, setVayanavasanthamSubTab] = useState<"issue" | "return" | "ledger" | "members" | "map">("issue");
   const [isVayanavasanthamLoading, setIsVayanavasanthamLoading] = useState(false);
   const [addMode, setAddMode] = useState<"manual" | "barcode">("manual");
   const [isbnLookup, setIsbnLookup] = useState("");
@@ -342,6 +367,46 @@ export default function App() {
   const [vvMembers, setVvMembers] = useState<any[]>([]);
   const [vvTab, setVvTab] = useState<'loans' | 'members'>('loans');
   const [showVvRegisterModal, setShowVvRegisterModal] = useState(false);
+  const [selectedVvMemberForPin, setSelectedVvMemberForPin] = useState<any>(null);
+  const [mapCenter] = useState<[number, number]>([10.7167, 76.3167]); // Near Kondazhy/Chelakkara
+  const [activeShelf, setActiveShelf] = useState<number | null>(null);
+  const [shelfBooks, setShelfBooks] = useState<any[]>([]);
+  const [isShelfLoading, setIsShelfLoading] = useState(false);
+  const [shelfPage, setShelfPage] = useState(0);
+  const [hasMoreShelf, setHasMoreShelf] = useState(true);
+  const PAGE_SIZE = 50;
+
+  const loadShelfBooks = useCallback(async (shelfNum: number, append = false) => {
+    setIsShelfLoading(true);
+    const currentPage = append ? shelfPage + 1 : 0;
+    
+    try {
+      const { data, error, count } = await supabase
+        .from("books")
+        .select("*", { count: 'exact' })
+        .eq("shelfnumber", String(shelfNum))
+        .order("stocknumber", { ascending: true })
+        .range(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE - 1);
+      
+      if (error) throw error;
+      
+      const newBooks = data || [];
+      if (append) {
+        setShelfBooks(prev => [...prev, ...newBooks]);
+      } else {
+        setShelfBooks(newBooks);
+      }
+      
+      setActiveShelf(shelfNum);
+      setShelfPage(currentPage);
+      setHasMoreShelf(newBooks.length === PAGE_SIZE);
+      
+    } catch (err: any) {
+      Swal.fire("Fetch Failed", err.message, "error");
+    } finally {
+      setIsShelfLoading(false);
+    }
+  }, [shelfPage]);
 
   const loadVvMembers = useCallback(async () => {
     const { data, error } = await supabase.from("vayanavasantham_members").select("*").order('created_at', { ascending: false });
@@ -376,6 +441,7 @@ export default function App() {
       attendance: "Attendance",
       reports: "Intelligence",
       duplicates: "Batch Ops & Registry",
+      shelfAudit: "Shelf Navigator",
       finance: "Ledger",
       config: "Library Config",
       welcome: "Welcome back, Admin.",
@@ -406,6 +472,7 @@ export default function App() {
       attendance: "ഹാജർ പട്ടിക",
       reports: "റിപ്പോർട്ടുകൾ",
       duplicates: "ബാച്ച് ഓപ്പറേഷൻസ്",
+      shelfAudit: "ഷെൽഫ് ഓഡിറ്റ്",
       finance: "സാമ്പത്തികം",
       config: "ക്രമീകരണങ്ങൾ",
       welcome: "സ്വാഗതം, അഡ്മിൻ.",
@@ -2845,6 +2912,7 @@ export default function App() {
             {[
               { id: "engagement", label: "Engagement Hub", icon: "🔔" },
               { id: "vouchers", label: "Voucher Hub", icon: "🎫" },
+              { id: "shelfAudit", label: t('shelfAudit'), icon: "🗄️" },
               { id: "map", label: "Store Mapping", icon: "🗺️" },
               { id: "settings", label: t('config'), icon: "⚙️" },
               { id: "reports", label: t('reports'), icon: "📈" },
@@ -4252,6 +4320,14 @@ export default function App() {
               >
                 👥 Member Registry
               </button>
+              <button 
+                onClick={() => { setVayanavasanthamSubTab("map"); loadVvMembers(); }}
+                className={`px-8 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase transition-all ${
+                  vayanavasanthamSubTab === "map" ? "bg-white text-primary shadow-sm" : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                📍 Distribution Map
+              </button>
             </div>
 
             {vayanavasanthamSubTab === "issue" && (
@@ -4473,6 +4549,143 @@ export default function App() {
                       )}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {vayanavasanthamSubTab === "map" && (
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[700px]">
+                {/* Member Selector Sidebar */}
+                <div className="section-card bg-white overflow-hidden flex flex-col">
+                  <div className="p-6 border-b border-slate-100">
+                    <h3 className="text-lg font-black text-slate-800">Pin Household</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Select member then click on map</p>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                    {vvMembers.map(m => (
+                      <button 
+                        key={m.id}
+                        onClick={() => setSelectedVvMemberForPin(m)}
+                        className={`w-full p-4 rounded-2xl border text-left transition-all relative group ${
+                          selectedVvMemberForPin?.id === m.id 
+                            ? 'border-accent bg-blue-50/50 shadow-md ring-2 ring-accent/20' 
+                            : 'border-slate-100 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs font-black text-slate-800">{m.full_name}</div>
+                          {m.latitude && (
+                            <span className="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-black">PINNED</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-bold mt-1 truncate">{m.place || 'No address'}</p>
+                        <div className="text-[9px] text-slate-400 mt-0.5">{m.phone}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Map Interface */}
+                <div className="lg:col-span-3 section-card bg-slate-100 overflow-hidden relative border-4 border-white shadow-2xl">
+                  <MapContainer center={mapCenter} zoom={15} className="h-full w-full z-10">
+                    <TileLayer
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    />
+                    
+                    <MapClickHandler 
+                      onMapClick={async (lat: number, lng: number) => {
+                        if (!selectedVvMemberForPin) {
+                          Swal.fire({
+                            toast: true,
+                            position: 'top',
+                            icon: 'info',
+                            title: 'Select a member first',
+                            showConfirmButton: false,
+                            timer: 2000
+                          });
+                          return;
+                        }
+
+                        const result = await Swal.fire({
+                          title: 'Save Household PIN?',
+                          text: `Are you sure you want to pin "${selectedVvMemberForPin.full_name}" here?`,
+                          icon: 'question',
+                          showCancelButton: true,
+                          confirmButtonText: 'Yes, Pin Location',
+                          confirmButtonColor: '#059669'
+                        });
+
+                        if (result.isConfirmed) {
+                          const { error } = await supabase
+                            .from('vayanavasantham_members')
+                            .update({ latitude: lat, longitude: lng })
+                            .eq('id', selectedVvMemberForPin.id);
+                          
+                          if (error) {
+                            Swal.fire('Failed', error.message, 'error');
+                          } else {
+                            Swal.fire({
+                              toast: true,
+                              position: 'top-end',
+                              icon: 'success',
+                              title: 'Location Saved',
+                              showConfirmButton: false,
+                              timer: 1500
+                            });
+                            loadVvMembers();
+                            setSelectedVvMemberForPin({...selectedVvMemberForPin, latitude: lat, longitude: lng});
+                          }
+                        }
+                      }}
+                    />
+
+                    {vvMembers.filter(m => m.latitude && m.longitude).map(m => (
+                      <Marker key={m.id} position={[m.latitude, m.longitude]}>
+                        <Popup>
+                          <div className="p-2">
+                            <h4 className="font-black text-slate-900 border-b pb-1 mb-1">{m.full_name}</h4>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{m.membership_id}</p>
+                            <p className="text-[10px] text-slate-600 mt-2">{m.address}</p>
+                            <div className="mt-3">
+                               <a 
+                                 href={`https://www.google.com/maps?q=${m.latitude},${m.longitude}`} 
+                                 target="_blank" 
+                                 rel="noreferrer"
+                                 className="text-[9px] bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-black uppercase tracking-widest hover:bg-emerald-700"
+                               >
+                                 Open Maps
+                               </a>
+                            </div>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
+                  </MapContainer>
+
+                  {!selectedVvMemberForPin && (
+                    <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/10 pointer-events-none">
+                      <div className="bg-white/90 backdrop-blur px-6 py-4 rounded-3xl shadow-2xl border border-white flex items-center gap-3 animate-bounce">
+                        <span className="text-2xl">👈</span>
+                        <span className="text-xs font-black text-slate-800 uppercase tracking-widest">Select member to start pinning</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedVvMemberForPin && (
+                    <div className="absolute top-6 left-6 z-20 pointer-events-none">
+                      <div className="bg-white/95 backdrop-blur-xl px-6 py-5 rounded-[32px] shadow-2xl border-4 border-emerald-500 animate-in slide-in-from-top-4 duration-300">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-2xl">👤</div>
+                          <div>
+                            <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Pinning Mode Active</p>
+                            <h4 className="text-lg font-black text-slate-900 leading-tight">{selectedVvMemberForPin.full_name}</h4>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Click house on map to lock coordinates</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -5525,6 +5738,135 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "shelfAudit" && (
+          <div className="flex flex-col gap-8 animate-in slide-in-from-bottom-4 duration-500 pb-20">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm">
+                <div>
+                  <h2 className="text-3xl font-black text-slate-800 tracking-tighter">SHELF NAVIGATOR</h2>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1">Cross-Check Digital Data against Physical Rack Storage</p>
+                </div>
+                {activeShelf && (
+                  <div className="bg-indigo-50 px-6 py-3 rounded-2xl border border-indigo-100">
+                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block">Active View</span>
+                    <span className="text-xl font-black text-indigo-600 tracking-tight">Shelf Room {activeShelf}</span>
+                  </div>
+                )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+              {/* Shelf Selection Grid */}
+              <div className="lg:col-span-1 space-y-4">
+                <div className="bg-slate-900 rounded-[32px] p-6 shadow-2xl">
+                  <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-4 ml-2">Select Rack Level</h3>
+                  <div className="grid grid-cols-5 gap-2">
+                    {Array.from({ length: 30 }, (_, i) => i + 1).map((shelf) => {
+                      const isSelected = activeShelf === shelf;
+                      return (
+                        <button
+                          key={shelf}
+                          onClick={() => loadShelfBooks(shelf)}
+                          className={`aspect-square flex items-center justify-center rounded-xl text-[11px] font-black transition-transform active:scale-95 ${
+                            isSelected 
+                              ? 'bg-accent text-white shadow-lg shadow-accent/40 ring-2 ring-accent ring-offset-2 ring-offset-slate-900' 
+                              : 'bg-white/10 text-white/60 hover:bg-white/20'
+                          }`}
+                        >
+                          {shelf}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-[32px] border border-slate-100 italic text-[10px] text-slate-400 leading-relaxed">
+                  Tip: Selecting a shelf will retrieve all associated assets from the centralized database for detailed verification.
+                </div>
+              </div>
+
+              {/* Shelf Contents */}
+              <div className="lg:col-span-3">
+                {isShelfLoading ? (
+                  <div className="h-[500px] bg-white rounded-[40px] flex flex-col items-center justify-center gap-4 text-slate-300">
+                    <div className="w-12 h-12 border-4 border-slate-100 border-t-primary rounded-full animate-spin"></div>
+                    <span className="text-[10px] font-black uppercase tracking-widest">Scanning Rack Data...</span>
+                  </div>
+                ) : activeShelf ? (
+                  <div className="section-card bg-white overflow-hidden p-0 border-slate-100 shadow-xl">
+                    <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+                      <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">
+                        Shelf {activeShelf} Contents <span className="ml-2 text-[10px] font-bold text-slate-400">({shelfBooks.length} Items Indexed)</span>
+                      </h3>
+                      <button 
+                        onClick={() => loadShelfBooks(activeShelf!)} 
+                        className="text-[10px] font-black text-primary uppercase tracking-widest hover:underline"
+                      >
+                        Refresh List
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto max-h-[600px] overflow-y-auto overscroll-contain">
+                      <table className="w-full text-left border-collapse table-fixed">
+                        <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                          <tr className="border-b border-slate-100">
+                            <th className="w-24 px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">CALL #</th>
+                            <th className="w-32 px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">STOCK #</th>
+                            <th className="px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">TITLE</th>
+                            <th className="w-48 px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest text-right">AUTHOR</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {shelfBooks.map((book) => (
+                            <tr key={book.id} className="hover:bg-indigo-50/30 transition-colors group">
+                              <td className="px-6 py-4">
+                                <span className="text-[10px] font-black text-indigo-600 font-mono">{book.callnumber || '—'}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="text-[10px] font-black text-slate-500 font-mono bg-slate-100 px-2 py-1 rounded">#{book.stocknumber}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="text-xs font-black text-slate-900 leading-tight truncate text-center" title={book.title}>{book.title}</div>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <span className="text-[10px] font-bold text-slate-600 truncate block">{book.author}</span>
+                              </td>
+                            </tr>
+                          ))}
+                          {shelfBooks.length === 0 && !isShelfLoading && (
+                            <tr>
+                              <td colSpan={4} className="px-6 py-20 text-center">
+                                <div className="text-4xl mb-4 opacity-10">🏜️</div>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">No assets linked to Shelf {activeShelf} in database</p>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                      {hasMoreShelf && shelfBooks.length > 0 && (
+                        <div className="p-8 flex justify-center bg-slate-50/50">
+                          <button 
+                            onClick={() => loadShelfBooks(activeShelf!, true)}
+                            disabled={isShelfLoading}
+                            className="bg-white border-2 border-slate-200 px-10 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-primary hover:text-primary transition-all disabled:opacity-50"
+                          >
+                            {isShelfLoading ? 'Loading Cache...' : 'Load More Results ↓'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-[500px] bg-slate-50/50 rounded-[40px] border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center">
+                    <div className="text-6xl mb-6 opacity-10 filter grayscale">🏛️</div>
+                    <h3 className="text-xl font-black text-slate-300 uppercase tracking-tighter">Navigator Depleted</h3>
+                    <p className="max-w-xs text-[10px] font-bold text-slate-400 leading-relaxed mt-2 uppercase tracking-widest">
+                      Select a physical rack location from the selection grid to begin audit verification.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
