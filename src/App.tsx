@@ -374,18 +374,20 @@ export default function App() {
   const [isShelfLoading, setIsShelfLoading] = useState(false);
   const [shelfPage, setShelfPage] = useState(0);
   const [hasMoreShelf, setHasMoreShelf] = useState(true);
+  const [shelfSortField, setShelfSortField] = useState<"callnumber" | "stocknumber" | "title">("callnumber");
   const PAGE_SIZE = 50;
 
-  const loadShelfBooks = useCallback(async (shelfNum: number, append = false) => {
+  const loadShelfBooks = useCallback(async (shelfNum: number, append = false, resetSort?: "callnumber" | "stocknumber" | "title") => {
     setIsShelfLoading(true);
+    const targetSortField = resetSort || shelfSortField;
     const currentPage = append ? shelfPage + 1 : 0;
     
     try {
-      const { data, error, count } = await supabase
+      const { data, error } = await supabase
         .from("books")
-        .select("*", { count: 'exact' })
+        .select("*")
         .eq("shelfnumber", String(shelfNum))
-        .order("stocknumber", { ascending: true })
+        .order(targetSortField, { ascending: true })
         .range(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE - 1);
       
       if (error) throw error;
@@ -397,6 +399,10 @@ export default function App() {
         setShelfBooks(newBooks);
       }
       
+      if (resetSort) {
+        setShelfSortField(resetSort);
+      }
+      
       setActiveShelf(shelfNum);
       setShelfPage(currentPage);
       setHasMoreShelf(newBooks.length === PAGE_SIZE);
@@ -406,7 +412,7 @@ export default function App() {
     } finally {
       setIsShelfLoading(false);
     }
-  }, [shelfPage]);
+  }, [shelfPage, shelfSortField]);
 
   const loadVvMembers = useCallback(async () => {
     const { data, error } = await supabase.from("vayanavasantham_members").select("*").order('created_at', { ascending: false });
@@ -5750,12 +5756,28 @@ export default function App() {
                   <h2 className="text-3xl font-black text-slate-800 tracking-tighter">SHELF NAVIGATOR</h2>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1">Cross-Check Digital Data against Physical Rack Storage</p>
                 </div>
-                {activeShelf && (
-                  <div className="bg-indigo-50 px-6 py-3 rounded-2xl border border-indigo-100">
-                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block">Active View</span>
-                    <span className="text-xl font-black text-indigo-600 tracking-tight">Shelf Room {activeShelf}</span>
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex items-center bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
+                    <button 
+                      onClick={() => activeShelf && loadShelfBooks(activeShelf, false, "callnumber")}
+                      className={`px-5 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${shelfSortField === 'callnumber' ? 'bg-white text-indigo-600 shadow-lg border border-indigo-50' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                      Sort by Call #
+                    </button>
+                    <button 
+                      onClick={() => activeShelf && loadShelfBooks(activeShelf, false, "stocknumber")}
+                      className={`px-5 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${shelfSortField === 'stocknumber' ? 'bg-white text-indigo-600 shadow-lg border border-indigo-50' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                      Sort by Stock #
+                    </button>
                   </div>
-                )}
+                  {activeShelf && (
+                    <div className="bg-indigo-900 px-6 py-3 rounded-2xl shadow-xl shadow-indigo-900/10">
+                      <span className="text-[10px] font-black text-indigo-200/50 uppercase tracking-widest block">Active View</span>
+                      <span className="text-lg font-black text-white tracking-tight leading-none">Shelf {activeShelf}</span>
+                    </div>
+                  )}
+                </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
@@ -5810,11 +5832,11 @@ export default function App() {
                     </div>
                     <div className="overflow-x-auto max-h-[600px] overflow-y-auto overscroll-contain">
                       <table className="w-full text-left border-collapse table-fixed">
-                        <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                        <thead className="sticky top-0 bg-white z-20 shadow-sm">
                           <tr className="border-b border-slate-100">
-                            <th className="w-24 px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">CALL #</th>
-                            <th className="w-32 px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">STOCK #</th>
-                            <th className="px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">TITLE</th>
+                            <th className="w-32 px-6 py-4 text-[9px] font-black uppercase text-indigo-500 tracking-widest bg-indigo-50/30">CALL NUMBER</th>
+                            <th className="w-28 px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest">STOCK #</th>
+                            <th className="px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest text-center">BOOK TITLE</th>
                             <th className="w-48 px-6 py-4 text-[9px] font-black uppercase text-slate-400 tracking-widest text-right">AUTHOR</th>
                           </tr>
                         </thead>
