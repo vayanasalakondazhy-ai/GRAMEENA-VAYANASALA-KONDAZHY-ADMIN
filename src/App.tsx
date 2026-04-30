@@ -375,7 +375,7 @@ export default function App() {
   const [shelfPage, setShelfPage] = useState(0);
   const [hasMoreShelf, setHasMoreShelf] = useState(true);
   const [shelfSortField, setShelfSortField] = useState<"callnumber" | "stocknumber" | "title">("callnumber");
-  const PAGE_SIZE = 50;
+  const PAGE_SIZE = 1000; // Increased to load typical shelf contents in one go
 
   const loadShelfBooks = useCallback(async (shelfNum: number, append = false, resetSort?: "callnumber" | "stocknumber" | "title") => {
     setIsShelfLoading(true);
