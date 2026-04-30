@@ -396,11 +396,20 @@ export default function App() {
       setShelfBooks(data || []);
       setActiveShelf(shelfNum);
     } catch (err: any) {
-      Swal.fire("Search Failed", err.message, "error");
+      // Background search fails silent to avoid annoying popups during typing
+      console.error("Search Failed", err.message);
     } finally {
       setIsShelfLoading(false);
     }
   }, [shelfSearchCall, shelfSearchStock]);
+
+  useEffect(() => {
+    if (!activeShelf) return;
+    const timer = setTimeout(() => {
+      loadShelfBooks(activeShelf);
+    }, 400); // Debounce typing
+    return () => clearTimeout(timer);
+  }, [activeShelf, shelfSearchCall, shelfSearchStock, loadShelfBooks]);
 
   const loadVvMembers = useCallback(async () => {
     const { data, error } = await supabase.from("vayanavasantham_members").select("*").order('created_at', { ascending: false });
@@ -5746,26 +5755,35 @@ export default function App() {
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
                   <div className="flex flex-wrap items-center bg-slate-50 p-2 rounded-[24px] border border-slate-100 gap-2">
-                    <input 
-                      type="text" 
-                      placeholder="Search Call #" 
-                      value={shelfSearchCall}
-                      onChange={(e) => setShelfSearchCall(e.target.value)}
-                      className="bg-white border-none rounded-xl px-4 py-2 text-[10px] font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 w-32"
-                    />
-                    <input 
-                      type="text" 
-                      placeholder="Search Stock #" 
-                      value={shelfSearchStock}
-                      onChange={(e) => setShelfSearchStock(e.target.value)}
-                      className="bg-white border-none rounded-xl px-4 py-2 text-[10px] font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 w-32"
-                    />
-                    <button 
-                      onClick={() => activeShelf && loadShelfBooks(activeShelf)}
-                      className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all"
-                    >
-                      Filter Shelf
-                    </button>
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        placeholder="Call #" 
+                        value={shelfSearchCall}
+                        onChange={(e) => setShelfSearchCall(e.target.value)}
+                        className="bg-white border-slate-100 rounded-xl px-4 py-2 text-[10px] font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 w-32 border"
+                      />
+                      {shelfSearchCall && (
+                        <button onClick={() => setShelfSearchCall("")} className="absolute right-2 top-1.5 text-slate-300 hover:text-slate-500">×</button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        placeholder="Stock #" 
+                        value={shelfSearchStock}
+                        onChange={(e) => setShelfSearchStock(e.target.value)}
+                        className="bg-white border-slate-100 rounded-xl px-4 py-2 text-[10px] font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 w-32 border"
+                      />
+                      {shelfSearchStock && (
+                        <button onClick={() => setShelfSearchStock("")} className="absolute right-2 top-1.5 text-slate-300 hover:text-slate-500">×</button>
+                      )}
+                    </div>
+                    {isShelfLoading && (
+                      <div className="px-3">
+                        <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                      </div>
+                    )}
                   </div>
                   {activeShelf && (
                     <div className="bg-indigo-900 px-6 py-3 rounded-2xl shadow-xl shadow-indigo-900/10">
