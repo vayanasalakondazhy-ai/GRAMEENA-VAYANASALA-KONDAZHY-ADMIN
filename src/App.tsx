@@ -372,47 +372,35 @@ export default function App() {
   const [activeShelf, setActiveShelf] = useState<number | null>(null);
   const [shelfBooks, setShelfBooks] = useState<any[]>([]);
   const [isShelfLoading, setIsShelfLoading] = useState(false);
-  const [shelfPage, setShelfPage] = useState(0);
-  const [hasMoreShelf, setHasMoreShelf] = useState(true);
-  const [shelfSortField, setShelfSortField] = useState<"callnumber" | "stocknumber" | "title">("callnumber");
-  const PAGE_SIZE = 1000; // Increased to load typical shelf contents in one go
+  const [shelfSearchCall, setShelfSearchCall] = useState("");
+  const [shelfSearchStock, setShelfSearchStock] = useState("");
 
-  const loadShelfBooks = useCallback(async (shelfNum: number, append = false, resetSort?: "callnumber" | "stocknumber" | "title") => {
+  const loadShelfBooks = useCallback(async (shelfNum: number) => {
     setIsShelfLoading(true);
-    const targetSortField = resetSort || shelfSortField;
-    const currentPage = append ? shelfPage + 1 : 0;
-    
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from("books")
         .select("*")
-        .eq("shelfnumber", String(shelfNum))
-        .order(targetSortField, { ascending: true })
-        .range(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE - 1);
+        .eq("shelfnumber", String(shelfNum));
+
+      if (shelfSearchCall.trim()) {
+        query = query.ilike("callnumber", `%${shelfSearchCall.trim()}%`);
+      }
+      if (shelfSearchStock.trim()) {
+        query = query.ilike("stocknumber", `%${shelfSearchStock.trim()}%`);
+      }
+
+      const { data, error } = await query.order("callnumber", { ascending: true });
       
       if (error) throw error;
-      
-      const newBooks = data || [];
-      if (append) {
-        setShelfBooks(prev => [...prev, ...newBooks]);
-      } else {
-        setShelfBooks(newBooks);
-      }
-      
-      if (resetSort) {
-        setShelfSortField(resetSort);
-      }
-      
+      setShelfBooks(data || []);
       setActiveShelf(shelfNum);
-      setShelfPage(currentPage);
-      setHasMoreShelf(newBooks.length === PAGE_SIZE);
-      
     } catch (err: any) {
-      Swal.fire("Fetch Failed", err.message, "error");
+      Swal.fire("Search Failed", err.message, "error");
     } finally {
       setIsShelfLoading(false);
     }
-  }, [shelfPage, shelfSortField]);
+  }, [shelfSearchCall, shelfSearchStock]);
 
   const loadVvMembers = useCallback(async () => {
     const { data, error } = await supabase.from("vayanavasantham_members").select("*").order('created_at', { ascending: false });
@@ -5757,18 +5745,26 @@ export default function App() {
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1">Cross-Check Digital Data against Physical Rack Storage</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
-                  <div className="flex items-center bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
+                  <div className="flex flex-wrap items-center bg-slate-50 p-2 rounded-[24px] border border-slate-100 gap-2">
+                    <input 
+                      type="text" 
+                      placeholder="Search Call #" 
+                      value={shelfSearchCall}
+                      onChange={(e) => setShelfSearchCall(e.target.value)}
+                      className="bg-white border-none rounded-xl px-4 py-2 text-[10px] font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 w-32"
+                    />
+                    <input 
+                      type="text" 
+                      placeholder="Search Stock #" 
+                      value={shelfSearchStock}
+                      onChange={(e) => setShelfSearchStock(e.target.value)}
+                      className="bg-white border-none rounded-xl px-4 py-2 text-[10px] font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500 w-32"
+                    />
                     <button 
-                      onClick={() => activeShelf && loadShelfBooks(activeShelf, false, "callnumber")}
-                      className={`px-5 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${shelfSortField === 'callnumber' ? 'bg-white text-indigo-600 shadow-lg border border-indigo-50' : 'text-slate-400 hover:text-slate-600'}`}
+                      onClick={() => activeShelf && loadShelfBooks(activeShelf)}
+                      className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all"
                     >
-                      Sort by Call #
-                    </button>
-                    <button 
-                      onClick={() => activeShelf && loadShelfBooks(activeShelf, false, "stocknumber")}
-                      className={`px-5 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${shelfSortField === 'stocknumber' ? 'bg-white text-indigo-600 shadow-lg border border-indigo-50' : 'text-slate-400 hover:text-slate-600'}`}
-                    >
-                      Sort by Stock #
+                      Filter Shelf
                     </button>
                   </div>
                   {activeShelf && (
@@ -5867,17 +5863,6 @@ export default function App() {
                           )}
                         </tbody>
                       </table>
-                      {hasMoreShelf && shelfBooks.length > 0 && (
-                        <div className="p-8 flex justify-center bg-slate-50/50">
-                          <button 
-                            onClick={() => loadShelfBooks(activeShelf!, true)}
-                            disabled={isShelfLoading}
-                            className="bg-white border-2 border-slate-200 px-10 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-primary hover:text-primary transition-all disabled:opacity-50"
-                          >
-                            {isShelfLoading ? 'Loading Cache...' : 'Load More Results ↓'}
-                          </button>
-                        </div>
-                      )}
                     </div>
                   </div>
                 ) : (
