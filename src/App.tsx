@@ -14,6 +14,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import Sanscript from "sanscript";
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { auth, loginWithGoogle, logout as firebaseLogout } from './lib/firebase';
 
 // Fix for Leaflet default icon issues in React
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -342,10 +344,6 @@ export default function App() {
   const [subsYearlyFee, setSubsYearlyFee] = useState(100);
   const [subsLifetimeFee, setSubsLifetimeFee] = useState(1000);
   const [subsJoiningFee, setSubsJoiningFee] = useState(10);
-  const [adminPassword, setAdminPassword] = useState("VAYANASALA_ADMIN_2026");
-  const [showResetModal, setShowResetModal] = useState(false);
-  const [resetKeyInput, setResetKeyInput] = useState("");
-  const [newPasswordReset, setNewPasswordReset] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -631,7 +629,6 @@ export default function App() {
         setSubsYearlyFee(data.subs_yearly_fee);
         setSubsLifetimeFee(data.subs_lifetime_fee);
         setSubsJoiningFee(data.subs_joining_fee);
-        if (data.admin_password) setAdminPassword(data.admin_password);
       }
     } catch (e) {
       console.error("Settings sync fatal error:", e);
@@ -755,7 +752,27 @@ export default function App() {
   const [foundReturnBooks, setFoundReturnBooks] = useState<any[]>([]);
   const [selectedReturnBook, setSelectedReturnBook] = useState<any>(null);
   const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
-  const [passwordInput, setPasswordInput] = useState("");
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  
+  // Authorized Administrative Personnel
+  const AUTHORIZED_EMAILS = [
+    "vayanasalakondazhy@gmail.com",
+    // Add additional authorized administrators here
+  ];
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      if (user && user.email && AUTHORIZED_EMAILS.includes(user.email)) {
+        setIsAuthorized(true);
+      } else {
+        setIsAuthorized(false);
+      }
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
   const [isManglishEnabled, setIsManglishEnabled] = useState(false);
   const [userHistory, setUserHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -900,96 +917,53 @@ export default function App() {
   }, [isManglishEnabled, focusedInput]);
 
 
-  const handleLogout = () => {
-    Swal.fire({
+  const handleLogout = async () => {
+    const result = await Swal.fire({
       title: 'Deauthorizing Session',
       text: 'Disconnecting from Digital Registry Core...',
-      timer: 1500,
-      showConfirmButton: false,
-      didOpen: () => Swal.showLoading()
-    }).then(() => {
-      setIsAuthorized(false);
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Logout',
+      cancelButtonText: 'Stay Logged In',
+      background: '#0F172A',
+      color: '#fff',
+      confirmButtonColor: '#ef4444'
     });
-  };
 
-  const handleLogin = (e: FormEvent) => {
-    e.preventDefault();
-    // High-Security Passphrase
-    if (passwordInput === adminPassword || passwordInput === "VAYANASALA_ADMIN_2026" || passwordInput === "vayanasala1231") {
-      Swal.fire({
-        icon: 'success',
-        title: 'Access Granted',
-        text: 'Identity verified. Initializing System Node...',
-        timer: 2000,
-        showConfirmButton: false,
-        background: '#0F172A',
-        color: '#fff'
-      });
-      setIsAuthorized(true);
-    } else {
-      Swal.fire({
-        icon: 'error',
-        title: 'Authentication Denied',
-        text: 'Unauthorized access attempt detected. Security protocols activated.',
-        background: '#0F172A',
-        color: '#fff'
-      });
-      // Visual feedback
-      const input = document.getElementById('pass-input');
-      if (input) {
-        input.classList.add('animate-shake');
-        setTimeout(() => input.classList.remove('animate-shake'), 500);
-      }
+    if (result.isConfirmed) {
+      await firebaseLogout();
+      setIsAuthorized(false);
     }
   };
 
-  const handleResetPassword = async (e: FormEvent) => {
-    e.preventDefault();
-    if (resetKeyInput !== "@RESETKONDAZHY1231") {
-      Swal.fire({ 
-        icon: 'error', 
-        title: 'Invalid Reset Key', 
-        text: 'Unauthorized reset request detected.',
-        background: '#0F172A',
-        color: '#fff'
-      });
-      return;
-    }
-    if (newPasswordReset.length < 4) {
-      Swal.fire({ icon: 'error', title: 'Invalid Password', text: 'Administrative passwords must be at least 4 characters.' });
-      return;
-    }
-    
-    setLookupLoading(true);
+  const handleGoogleLogin = async () => {
     try {
-      const { error } = await supabase
-        .from('lib_settings')
-        .update({ admin_password: newPasswordReset })
-        .eq('id', 1);
-        
-      if (error) {
-        // If column doesn't exist, we might need to inform or handle it
-        if (error.message.includes("column \"admin_password\" of relation \"lib_settings\" does not exist")) {
-           throw new Error("Master database node requires field expansion. Please contact system architect to add 'admin_password' to 'lib_settings'.");
-        }
-        throw error;
+      setAuthLoading(true);
+      const user = await loginWithGoogle();
+      if (user && user.email && AUTHORIZED_EMAILS.includes(user.email)) {
+        Swal.fire({
+          icon: 'success',
+          title: 'Identity Verified',
+          text: `Welcome back, ${user.displayName}. Initializing System Node...`,
+          timer: 2000,
+          showConfirmButton: false,
+          background: '#0F172A',
+          color: '#fff'
+        });
+        setIsAuthorized(true);
+      } else {
+        await firebaseLogout();
+        Swal.fire({
+          icon: 'error',
+          title: 'Access Denied',
+          text: 'The Google account used is not in the Authorized Personnel Registry.',
+          background: '#0F172A',
+          color: '#fff'
+        });
       }
-      
-      setAdminPassword(newPasswordReset);
-      setShowResetModal(false);
-      setResetKeyInput("");
-      setNewPasswordReset("");
-      Swal.fire({ 
-        icon: 'success', 
-        title: 'Credentials Reset', 
-        text: 'New master password synchronized. Access nodes updated.',
-        background: '#0F172A',
-        color: '#fff'
-      });
     } catch (e: any) {
-      Swal.fire({ icon: 'error', title: 'Reset Failed', text: e.message });
+      Swal.fire({ icon: 'error', title: 'Auth Failed', text: e.message });
     } finally {
-      setLookupLoading(false);
+      setAuthLoading(false);
     }
   };
 
@@ -2789,6 +2763,15 @@ export default function App() {
     return () => { channel.unsubscribe(); };
   }, [loadDashboard, loadIssued, loadMembers, fetchVouchers]);
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 space-y-6">
+        <div className="w-16 h-16 border-4 border-accent border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-white text-[10px] font-black uppercase tracking-[0.4em] animate-pulse">Syncing Cryptographic Identity...</p>
+      </div>
+    );
+  }
+
   if (!isAuthorized) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 relative overflow-hidden font-sans">
@@ -2804,102 +2787,48 @@ export default function App() {
              <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
              
              <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-white/20 text-3xl">
-               🔒
+               🛡️
              </div>
-             <h1 className="text-xl font-black text-white tracking-widest uppercase">Admin Portal</h1>
+             <h1 className="text-xl font-black text-white tracking-widest uppercase">Admin Terminal</h1>
              <p className="text-[10px] text-slate-400 font-bold tracking-[0.2em] mt-2">GRAMEENA VAYANASALA KONDAZHY</p>
           </div>
 
-          <div className="p-8">
-            <form onSubmit={handleLogin} className="space-y-6">
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2 px-1">System Password</label>
-                <div className="relative">
-                  <input 
-                    type="password" 
-                    value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
-                    placeholder="••••••••••••"
-                    className="w-full bg-slate-50 border-2 border-slate-100 focus:border-accent rounded-2xl px-5 py-4 text-sm outline-none transition-all font-mono tracking-widest"
-                    autoFocus
-                  />
-                  <div className="absolute right-5 top-1/2 -translate-y-1/2 opacity-20">🗝️</div>
-                </div>
-              </div>
+          <div className="p-10 space-y-8">
+            <div className="text-center">
+              <h2 className="text-lg font-bold text-slate-800">Biometric Identity Verification</h2>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Multi-Factor Protocol Required</p>
+            </div>
 
-              <button 
-                type="submit" 
-                className="w-full bg-slate-900 text-white rounded-2xl py-4 font-black text-xs uppercase tracking-[0.3em] hover:bg-black transition-all shadow-xl shadow-slate-900/10 active:scale-[0.98]"
-              >
-                Unlock Repository
-              </button>
-
-              <button 
-                type="button"
-                onClick={() => setShowResetModal(true)}
-                className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-accent transition-colors"
-              >
-                Forgot Logic Key?
-              </button>
-            </form>
+            <button 
+              onClick={handleGoogleLogin}
+              disabled={authLoading}
+              className="w-full bg-slate-50 border-2 border-slate-100 hover:border-accent hover:bg-white text-slate-700 rounded-3xl py-5 px-6 font-black text-xs uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 group active:scale-[0.98] shadow-sm"
+            >
+              <img src="https://www.google.com/favicon.ico" className="w-5 h-5 group-hover:scale-110 transition-transform" alt="" />
+              Sign in with Google
+            </button>
             
-            <p className="text-[9px] text-slate-400 text-center mt-8 font-medium uppercase tracking-widest opacity-60">
-              Restricted Access. Authorized Personnel Only.
-            </p>
+            <div className="flex items-center gap-4 opacity-30">
+              <div className="flex-1 h-px bg-slate-300"></div>
+              <span className="text-[8px] font-black uppercase text-slate-400">Secure Node V.2026</span>
+              <div className="flex-1 h-px bg-slate-300"></div>
+            </div>
+
+            <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
+               <p className="text-[9px] text-slate-400 leading-relaxed font-bold uppercase tracking-[0.05em]">
+                 This terminal uses <span className="text-primary">Military-Grade SSO</span>. Only registered administrative accounts can decrypt the local database storage.
+               </p>
+            </div>
+
+            <div className="text-center">
+               <p className="text-[9px] text-slate-400 uppercase tracking-widest opacity-60">
+                 Unrecognized attempts are automatically logged and flagged.
+               </p>
+            </div>
           </div>
         </div>
 
-        {/* Password Reset Modal */}
-        {showResetModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-            <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm border border-slate-200">
-              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-2">Emergency Reset</h3>
-              <p className="text-xs text-slate-500 font-medium mb-6">Enter the master synchronization key to overwrite administrative credentials.</p>
-              
-              <form onSubmit={handleResetPassword} className="space-y-4">
-                <div>
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2 px-1">Master Reset Key</label>
-                  <input 
-                    type="password" 
-                    value={resetKeyInput}
-                    onChange={(e) => setResetKeyInput(e.target.value)}
-                    placeholder="ADMIN_MASTER_KEY"
-                    className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-3 text-sm font-mono"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2 px-1">New System Password</label>
-                  <input 
-                    type="password" 
-                    value={newPasswordReset}
-                    onChange={(e) => setNewPasswordReset(e.target.value)}
-                    placeholder="New Password"
-                    className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-3 text-sm font-mono"
-                    required
-                  />
-                </div>
-                
-                <div className="flex gap-2 pt-2">
-                  <button 
-                    type="submit" 
-                    disabled={lookupLoading}
-                    className="flex-[2] bg-accent text-white rounded-xl py-3 font-black text-[10px] uppercase tracking-widest shadow-lg shadow-accent/20 hover:scale-105 transition-all disabled:opacity-50"
-                  >
-                    {lookupLoading ? 'Synchronizing...' : 'Update Credentials'}
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={() => setShowResetModal(false)}
-                    className="flex-1 bg-slate-100 text-slate-500 rounded-xl py-3 font-black text-[10px] uppercase tracking-widest hover:bg-slate-200"
-                  >
-                    Abort
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+
       </div>
     );
   }
