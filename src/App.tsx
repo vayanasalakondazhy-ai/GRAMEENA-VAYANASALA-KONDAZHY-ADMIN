@@ -374,6 +374,8 @@ export default function App() {
   const [isShelfLoading, setIsShelfLoading] = useState(false);
   const [shelfSearchCall, setShelfSearchCall] = useState("");
   const [shelfSearchStock, setShelfSearchStock] = useState("");
+  const [customIssueDate, setCustomIssueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [customReturnDate, setCustomReturnDate] = useState(new Date().toISOString().split('T')[0]);
 
   const loadShelfBooks = useCallback(async (shelfNum: number) => {
     setIsShelfLoading(true);
@@ -1019,6 +1021,71 @@ export default function App() {
   }, []);
 
   // Members
+  const showMemberInfo = (m: any) => {
+    Swal.fire({
+      title: `<div class="text-left"><span class="text-xs uppercase text-slate-400 font-black tracking-[0.2em] mb-1 block">Member Identification</span><span class="text-2xl font-black text-slate-800">${m.name || 'Anonymous User'}</span></div>`,
+      html: `
+        <div class="text-left space-y-4 font-sans max-h-[60vh] overflow-y-auto px-1">
+          <div class="grid grid-cols-2 gap-4">
+            <div class="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+              <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Membership ID</p>
+              <p class="text-xs font-black text-primary font-mono">${m.member_id || 'NOT_ASSIGNED'}</p>
+            </div>
+            <div class="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+              <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Contact Access</p>
+              <p class="text-xs font-bold text-slate-700">${m.phone || 'NO_PHONE'}</p>
+            </div>
+          </div>
+          
+          <div class="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+            <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Residential Coordinates</p>
+            <p class="text-xs text-slate-600 leading-relaxed">${m.address || 'Location data not shared'}</p>
+            ${m.pincode ? `<p class="text-[10px] font-bold text-slate-400 mt-1">POSTAL: ${m.pincode}</p>` : ''}
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+              <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Identity Stats</p>
+              <p class="text-xs text-slate-600 font-bold">${m.gender || 'Universal'} ${m.age ? `• ${m.age} Years` : ''}</p>
+            </div>
+            <div class="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+              <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Professional Profile</p>
+              <p class="text-xs text-slate-600 font-bold">${m.occupation || 'Self-Employed / Other'}</p>
+            </div>
+          </div>
+
+          ${m.email ? `
+          <div class="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+            <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Digital Correspondence</p>
+            <p class="text-xs text-slate-600 font-bold">${m.email}</p>
+          </div>
+          ` : ''}
+
+          ${m.notes ? `
+          <div class="bg-slate-900 p-5 rounded-3xl border-l-4 border-accent">
+            <p class="text-[9px] font-black text-accent uppercase tracking-widest mb-2 flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
+              Confidential Internal Notes
+            </p>
+            <p class="text-xs text-slate-300 italic">${m.notes}</p>
+          </div>
+          ` : ''}
+          
+          <div class="pt-4 border-t border-slate-100">
+            <p class="text-[9px] font-black text-slate-300 uppercase tracking-widest text-center">Protocol Registry Record • Created on ${new Date(m.created_at).toLocaleDateString()}</p>
+          </div>
+        </div>
+      `,
+      showConfirmButton: true,
+      confirmButtonText: 'ACKNOWLEDGE',
+      confirmButtonColor: '#1e293b',
+      customClass: {
+        popup: 'rounded-[40px]',
+        confirmButton: 'rounded-2xl px-8'
+      }
+    });
+  };
+
   const loadMembers = useCallback(async () => {
     try {
       const { data, error } = await supabase.from("users").select("*").order('created_at', { ascending: false });
@@ -1203,8 +1270,8 @@ export default function App() {
     const { data: existing } = await supabase.from("vayanavasantham_issued").select("*").eq("book_id", selectedIssueBook.id).maybeSingle();
     if (existing) return Swal.fire({ icon: 'error', title: 'Oops!', text: 'This book is already issued under this project.' });
 
-    const now = new Date();
-    const due = new Date();
+    const now = customIssueDate ? new Date(customIssueDate) : new Date();
+    const due = new Date(now);
     due.setMonth(due.getMonth() + 1);
 
     const { error } = await supabase.from("vayanavasantham_issued").insert([{
@@ -1224,6 +1291,7 @@ export default function App() {
     } else {
       Swal.fire({ icon: 'success', title: 'Vayanavasantham Issue Successful!', timer: 1500, showConfirmButton: false });
       setSelectedIssueBook(null);
+      setCustomIssueDate(new Date().toISOString().split('T')[0]);
       setIssueSearchVal("");
       setFoundIssueBooks([]);
       fetchVayanavasanthamIssued();
@@ -1240,7 +1308,7 @@ export default function App() {
       stock_number: selectedBook.stock_number,
       user_phone: selectedBook.user_phone,
       issue_date: selectedBook.issue_date,
-      return_date: new Date().toISOString(),
+      return_date: customReturnDate ? new Date(customReturnDate).toISOString() : new Date().toISOString(),
       status: 'returned',
       project: 'Vayanavasantham'
     };
@@ -1252,6 +1320,7 @@ export default function App() {
       Swal.fire({ icon: 'error', title: 'Return Interrupted', text: error.message });
     } else {
       Swal.fire({ icon: 'success', title: 'Returned to Library!', timer: 1500, showConfirmButton: false });
+      setCustomReturnDate(new Date().toISOString().split('T')[0]);
       fetchVayanavasanthamIssued();
       loadIssued();
       loadDashboard();
@@ -1873,8 +1942,8 @@ export default function App() {
     const { data: existing } = await supabase.from("issued_books").select("*").eq("book_id", selectedIssueBook.id).maybeSingle();
     if (existing) return Swal.fire({ icon: 'error', title: 'Oops!', text: 'This book is already issued.' });
 
-    const now = new Date();
-    const due = new Date();
+    const now = customIssueDate ? new Date(customIssueDate) : new Date();
+    const due = new Date(now);
     due.setMonth(due.getMonth() + 1);
 
     const { error } = await supabase.from("issued_books").insert([{
@@ -1889,6 +1958,7 @@ export default function App() {
     else {
       Swal.fire({ icon: 'success', title: 'Book Issued!', timer: 1500, showConfirmButton: false });
       setSelectedIssueBook(null);
+      setCustomIssueDate(new Date().toISOString().split('T')[0]);
       setIssueSearchVal("");
       setFoundIssueBooks([]);
       loadIssued();
@@ -1915,7 +1985,7 @@ export default function App() {
       stock_number: selectedReturnBook.stock_number,
       user_phone: selectedReturnBook.user_phone,
       issue_date: selectedReturnBook.issue_date,
-      return_date: new Date().toISOString(),
+      return_date: customReturnDate ? new Date(customReturnDate).toISOString() : new Date().toISOString(),
       status: 'returned'
     };
     
@@ -1925,6 +1995,7 @@ export default function App() {
     if (error) {
       Swal.fire({ icon: 'error', title: 'Return Interrupted', text: error.message });
     } else {
+      setCustomReturnDate(new Date().toISOString().split('T')[0]);
       if (fine > 0) {
         const { isConfirmed } = await Swal.fire({
           icon: 'warning',
@@ -3326,7 +3397,7 @@ export default function App() {
               </div>
 
               <div className="flex-1 flex flex-col overflow-hidden">
-                <div className="p-8 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                <div className="p-8 bg-slate-50 border-b border-slate-100 flex flex-col xl:flex-row xl:justify-between xl:items-start gap-6">
                   <div className="flex flex-col gap-1 text-left">
                     <h2 className="text-2xl font-black text-slate-900 tracking-tighter leading-none">Database Registry</h2>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1.5 flex items-center gap-2">
@@ -3335,47 +3406,53 @@ export default function App() {
                     </p>
                   </div>
                   
-                  <div className="flex items-center gap-4">
-                    <button 
-                      onClick={() => { loadMembers(); loadDashboard(); }}
-                      className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all"
-                      title="Forced Re-Sync"
-                    >
-                      🔄
-                    </button>
-                    <button 
-                      onClick={exportMemberHealthReport}
-                      className="px-5 py-3 rounded-2xl bg-red-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-red-700 transition-all shadow-sm flex items-center gap-2"
-                    >
-                      📉 Health Rpt
-                    </button>
-                    <button 
-                      onClick={exportToCSV}
-                      className="px-5 py-3 rounded-2xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-sm flex items-center gap-2"
-                    >
-                      📥 Export
-                    </button>
-                    <button 
-                      onClick={() => { setIsFullScan(!isFullScan); loadMembers(); }}
-                      className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center gap-2 ${isFullScan ? 'bg-accent text-white animate-pulse' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                      title="Toggle Deep Scan (Slow)"
-                    >
-                      📡 {isFullScan ? 'Deep Scan ON' : 'Standard Scan'}
-                    </button>
-                    <button 
-                      onClick={() => setShowMemberFilters(!showMemberFilters)}
-                      className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm ${showMemberFilters ? 'bg-primary text-white scale-105' : 'bg-white text-slate-600 border-2 border-slate-100 hover:border-primary/30'}`}
-                    >
-                      {showMemberFilters ? '⚙️ ACTIVE' : '🔍 FILTERS'}
-                    </button>
-                    <div className="relative group">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => { loadMembers(); loadDashboard(); }}
+                        className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-sm"
+                        title="Forced Re-Sync"
+                      >
+                        🔄
+                      </button>
+                      <button 
+                        onClick={exportMemberHealthReport}
+                        className="px-4 py-2.5 rounded-xl bg-red-600 text-white text-[9px] font-black uppercase tracking-widest hover:bg-red-700 transition-all shadow-sm flex items-center gap-2"
+                      >
+                        📉 Health
+                      </button>
+                      <button 
+                        onClick={exportToCSV}
+                        className="px-4 py-2.5 rounded-xl bg-slate-800 text-white text-[9px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-sm flex items-center gap-2"
+                      >
+                        📥 Export
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => { setIsFullScan(!isFullScan); loadMembers(); }}
+                        className={`px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-sm flex items-center gap-2 ${isFullScan ? 'bg-accent text-white animate-pulse' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                        title="Toggle Deep Scan (Slow)"
+                      >
+                        📡 {isFullScan ? 'Deep ON' : 'Scan'}
+                      </button>
+                      <button 
+                        onClick={() => setShowMemberFilters(!showMemberFilters)}
+                        className={`px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-sm ${showMemberFilters ? 'bg-primary text-white scale-105' : 'bg-white text-slate-600 border-2 border-slate-100 hover:border-primary/30'}`}
+                      >
+                        {showMemberFilters ? '⚙️ ACTIVE' : '🔍 FILTERS'}
+                      </button>
+                    </div>
+
+                    <div className="relative group flex-grow md:flex-grow-0">
                       <input 
                         placeholder="Search Identity..." 
                         value={memberSearch}
                         onChange={(e) => setMemberSearch(e.target.value)}
-                        className="pl-12 pr-6 py-3 bg-white border-2 border-slate-100 rounded-2xl text-xs outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all w-80 shadow-sm"
+                        className="pl-10 pr-4 py-2.5 bg-white border-2 border-slate-100 rounded-xl text-xs outline-none focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all w-full md:w-64 shadow-sm"
                       />
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg opacity-40 group-focus-within:opacity-100 transition-opacity">📂</span>
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm opacity-40 group-focus-within:opacity-100 transition-opacity">📂</span>
                       {memberFilterSub !== 'all' && (
                         <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-amber-500 text-white text-[8px] font-black rounded-full uppercase tracking-widest shadow-lg animate-pulse whitespace-nowrap">
                           {memberFilterSub.toUpperCase()} ONLY
@@ -4398,6 +4475,15 @@ export default function App() {
                       </select>
                     </div>
                   </div>
+                  <div className="pt-4 border-t border-surface-border">
+                    <p className="text-[10px] font-bold text-text-muted uppercase mb-2">Backdate Dispatch (Optional)</p>
+                    <input 
+                      type="date" 
+                      value={customIssueDate}
+                      onChange={(e) => setCustomIssueDate(e.target.value)}
+                      className="input-field text-[11px] font-bold"
+                    />
+                  </div>
                   <button onClick={issueVayanavasanthamBook} className="bg-primary text-white w-full py-4 rounded-2xl uppercase font-black text-[11px] tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">Record Delivery Dispatch</button>
                 </div>
               </div>
@@ -4405,9 +4491,20 @@ export default function App() {
 
             {vayanavasanthamSubTab === "return" && (
               <div className="max-w-xl section-card">
-                <div className="section-header">
-                  <h2 className="text-xl font-black text-slate-800">Return Collection</h2>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Collecting back from Households</p>
+                <div className="section-header flex justify-between items-center pr-6">
+                  <div>
+                    <h2 className="text-xl font-black text-slate-800">Return Collection</h2>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Collecting back from Households</p>
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase">Return Date:</span>
+                    <input 
+                      type="date" 
+                      value={customReturnDate}
+                      onChange={(e) => setCustomReturnDate(e.target.value)}
+                      className="bg-white border-0 rounded-lg px-2 py-0.5 text-[10px] font-bold text-slate-600 focus:ring-1 focus:ring-indigo-500 w-32"
+                    />
+                  </div>
                 </div>
                 <div className="p-6 space-y-6">
                   <div className="flex gap-2">
@@ -5243,36 +5340,83 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  <div className="pt-4 border-t border-surface-border space-y-2">
+                  <div className="pt-4 border-t border-surface-border space-y-3">
                     <p className="text-[10px] font-bold text-text-muted uppercase mb-1">TARGET MEMBER ASSIGNEE</p>
-                    <div className="flex gap-2">
-                      <div className="relative flex-grow">
-                        <input 
-                          type="text"
-                          placeholder="Search member by name or phone..."
-                          value={issueMemberSearch}
-                          onChange={(e) => setIssueMemberSearch(e.target.value)}
-                          className="input-field pl-8"
-                        />
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
-                      </div>
-                      <select 
-                        value={selectedIssueUserPhone} 
-                        onChange={(e) => setSelectedIssueUserPhone(e.target.value)}
-                        className="input-field min-w-[200px]"
-                      >
-                        <option value="">-- Select Member --</option>
-                        {members
+                    <div className="relative">
+                      <input 
+                        type="text"
+                        placeholder="Search member by name, phone or ID..."
+                        value={issueMemberSearch}
+                        onChange={(e) => setIssueMemberSearch(e.target.value)}
+                        className="input-field pl-10 h-12"
+                      />
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+                    </div>
+                    
+                    <div className="space-y-2 max-h-[220px] overflow-y-auto pr-2 custom-scrollbar">
+                      {issueMemberSearch.trim() === "" ? (
+                        <div className="text-center py-6 border-2 border-dashed border-slate-100 rounded-2xl">
+                          <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest leading-relaxed">Search to verify member identity<br/>before asset assignment</p>
+                        </div>
+                      ) : (
+                        members
                           .filter(m => 
                             (m.name || "").toLowerCase().includes(issueMemberSearch.toLowerCase()) || 
-                            (m.phone || "").includes(issueMemberSearch)
+                            (m.phone || "").includes(issueMemberSearch) ||
+                            (m.member_id || "").toLowerCase().includes(issueMemberSearch.toLowerCase())
                           )
+                          .slice(0, 8)
                           .map(m => (
-                            <option key={m.id} value={m.phone}>{m.name} ({m.phone})</option>
+                            <div 
+                              key={m.id}
+                              onClick={() => setSelectedIssueUserPhone(m.phone)}
+                              className={`p-3 rounded-2xl border transition-all cursor-pointer group flex items-center justify-between ${
+                                selectedIssueUserPhone === m.phone 
+                                  ? 'border-accent bg-blue-50/50 ring-2 ring-accent/10 shadow-sm' 
+                                  : 'border-slate-100 hover:border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xs font-black transition-all ${
+                                  selectedIssueUserPhone === m.phone ? 'bg-primary text-white rotate-3' : 'bg-slate-100 text-slate-400 group-hover:bg-slate-200'
+                                }`}>
+                                  {m.name ? m.name.charAt(0).toUpperCase() : '?'}
+                                </div>
+                                <div>
+                                  <div className="text-xs font-black text-slate-800">{m.name}</div>
+                                  <div className="text-[9px] font-bold text-slate-400 font-mono tracking-tight">{m.phone} | {m.member_id || 'ID_PENDING'}</div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); showMemberInfo(m); }}
+                                  className="w-10 h-10 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-xs hover:border-primary hover:text-primary transition-all shadow-sm group-hover:scale-105 active:scale-95"
+                                  title="View Full Profile"
+                                >
+                                  ℹ️
+                                </button>
+                                <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${selectedIssueUserPhone === m.phone ? 'border-accent bg-accent scale-110 shadow-lg shadow-accent/20' : 'border-slate-200 bg-white'}`}>
+                                  {selectedIssueUserPhone === m.phone && <span className="text-white text-[10px]">✓</span>}
+                                </div>
+                              </div>
+                            </div>
                           ))
-                        }
-                      </select>
+                      )}
+                      {issueMemberSearch.trim() !== "" && members.filter(m => (m.name || "").toLowerCase().includes(issueMemberSearch.toLowerCase()) || (m.phone || "").includes(issueMemberSearch) || (m.member_id || "").toLowerCase().includes(issueMemberSearch.toLowerCase())).length === 0 && (
+                         <div className="text-center py-8 bg-slate-50 rounded-2xl border border-slate-100">
+                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">No matching members found in registry</p>
+                         </div>
+                      )}
                     </div>
+                  </div>
+                  <div className="pt-4 border-t border-surface-border">
+                    <p className="text-[10px] font-bold text-text-muted uppercase mb-2">Backdate Assignment (Optional)</p>
+                    <input 
+                      type="date" 
+                      value={customIssueDate}
+                      onChange={(e) => setCustomIssueDate(e.target.value)}
+                      className="input-field text-[11px] font-bold"
+                    />
                   </div>
                   <button onClick={issueBook} className="bg-primary text-white w-full py-4 rounded-2xl uppercase font-black text-[11px] tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">Execute Assignment Entry</button>
                 </div>
@@ -5314,6 +5458,15 @@ export default function App() {
                         <div className="text-[10px] text-slate-400 font-bold uppercase tracking-tight mt-1">STOCK: {d.stock_number} | ACCOUNT: {d.user_phone}</div>
                       </div>
                     ))}
+                  </div>
+                  <div className="pt-4 border-t border-surface-border">
+                    <p className="text-[10px] font-bold text-text-muted uppercase mb-2">Backdate Return (Optional)</p>
+                    <input 
+                      type="date" 
+                      value={customReturnDate}
+                      onChange={(e) => setCustomReturnDate(e.target.value)}
+                      className="input-field text-[11px] font-bold"
+                    />
                   </div>
                   <button onClick={returnBook} className="bg-primary text-white w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">Verify & Clear Log</button>
                 </div>
