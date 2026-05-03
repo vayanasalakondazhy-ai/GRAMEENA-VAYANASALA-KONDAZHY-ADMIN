@@ -348,6 +348,9 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [financialStats, setFinancialStats] = useState({ total: 0, fines: 0, subs: 0 });
+  const [totalAssetValue, setTotalAssetValue] = useState<number>(0);
+  const [isAssetScanning, setIsAssetScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
   const [vouchers, setVouchers] = useState<any[]>([]);
   const [voucherSearch, setVoucherSearch] = useState("");
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
@@ -446,6 +449,15 @@ export default function App() {
       duplicates: "Batch Ops & Registry",
       shelfAudit: "Shelf Navigator",
       finance: "Ledger",
+      vouchers: "Voucher Audit",
+      vayanavasantham: "VV Project",
+      engagement: "Digital Hub",
+      assetOps: "Asset Ops",
+      liveLedger: "Live Ledger",
+      vvProject: "Vayanavasantham",
+      storeMapping: "Store Mapping",
+      reports_intel: "Reports & Analytics",
+      settings: "Control Panel",
       config: "Library Config",
       welcome: "Welcome back, Admin.",
       totalBooks: "TOTAL ASSETS",
@@ -465,7 +477,20 @@ export default function App() {
       subs: "Subs Revenue",
       lastAudit: "Recent Audit Logs",
       portalSubtitle: "GRAMEENA VAYANASALA KONDAZHY",
-      logout: "Deauthorize Session"
+      logout: "Deauthorize Session",
+      assetValue: "Total Asset Value",
+      scanAssets: "Scan Assets",
+      auditComplete: "Audit Complete",
+      membersHub: "Member Hub",
+      bookRegistry: "Book Registry",
+      circulation_desk: "Circulation Desk",
+      financial_ledger: "Financial Ledger",
+      recentTransactions: "Recent Transactions",
+      viewAll: "View All",
+      noRecentFinance: "No recent financial events",
+      dbOnline: "DATABASE: ONLINE",
+      dbSyncing: "DATABASE: SYNCING",
+      dbOffline: "DATABASE: OFFLINE"
     },
     ml: {
       dashboard: "ഡാഷ്‌ബോർഡ്",
@@ -477,6 +502,15 @@ export default function App() {
       duplicates: "ബാച്ച് ഓപ്പറേഷൻസ്",
       shelfAudit: "ഷെൽഫ് ഓഡിറ്റ്",
       finance: "സാമ്പത്തികം",
+      vouchers: "വാച്ചറുകൾ",
+      vayanavasantham: "വായനവസന്തം",
+      engagement: "ഡിജിറ്റൽ ഹബ്ബ്",
+      assetOps: "വിതരണ വിഭാഗം",
+      liveLedger: "തത്സമയ കണക്ക്",
+      vvProject: "വായനവസന്തം പ്രോജക്ട്",
+      storeMapping: "ലൈബ്രറി മാപ്പ്",
+      reports_intel: "റിപ്പോർട്ടുകളും വിശകലനവും",
+      settings: "നിയന്ത്രണങ്ങൾ",
       config: "ക്രമീകരണങ്ങൾ",
       welcome: "സ്വാഗതം, അഡ്മിൻ.",
       totalBooks: "ആകെ പുസ്തകങ്ങൾ",
@@ -496,7 +530,14 @@ export default function App() {
       subs: "വരിസംഖ്യ",
       lastAudit: "സമീപകാല പ്രവർത്തനങ്ങൾ",
       portalSubtitle: "ഗ്രാമീണ വായനശാല കൊണ്ടഴി",
-      logout: "ലോഗ് ഔട്ട്"
+      logout: "ലോഗ് ഔട്ട്",
+      assetValue: "ആകെ ആസ്തി മൂല്യം",
+      scanAssets: "ആസ്തി പരിശോധിക്കുക",
+      auditComplete: "പരിശോധന പൂർത്തിയായി",
+      membersHub: "അംഗങ്ങളുടെ വിവരങ്ങൾ",
+      bookRegistry: "പുസ്തക രജിസ്റ്റർ",
+      circulation_desk: "വിതരണ വിഭാഗം",
+      financial_ledger: "സാമ്പത്തിക കണക്കുകൾ"
     }
   };
 
@@ -721,6 +762,72 @@ export default function App() {
       }
     } catch (e) {
       console.warn("Transaction persistence failed:", e);
+    }
+  };
+
+  const calculateTotalAssets = async () => {
+    setIsAssetScanning(true);
+    setScanProgress(0);
+    setTotalAssetValue(0);
+    
+    try {
+      // 1. Get total count first
+      const { count, error: countError } = await supabase
+        .from("books")
+        .select("*", { count: "exact", head: true });
+      
+      if (countError) throw countError;
+      const totalBooks = count || 0;
+      
+      if (totalBooks === 0) {
+        Swal.fire({ icon: 'info', title: 'No Data', text: 'No books found in the registry to calculate value.' });
+        return;
+      }
+
+      let runningTotal = 0;
+      const batchSize = 1000;
+      let offset = 0;
+
+      while (offset < totalBooks) {
+        const { data, error } = await supabase
+          .from("books")
+          .select("price")
+          .range(offset, offset + batchSize - 1);
+
+        if (error) throw error;
+
+        const batchSum = (data || []).reduce((acc, curr) => {
+          const priceStr = String(curr.price || "0").replace(/[^0-9.]/g, "");
+          const priceNum = parseFloat(priceStr);
+          return acc + (isNaN(priceNum) ? 0 : priceNum);
+        }, 0);
+
+        runningTotal += batchSum;
+        offset += batchSize;
+        
+        const progress = Math.min(Math.round((offset / totalBooks) * 100), 100);
+        setScanProgress(progress);
+        
+        // Brief delay to prevent UI thread lock
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
+      setTotalAssetValue(runningTotal);
+      
+      Swal.fire({
+        icon: 'success',
+        title: 'Inventory Audit Complete',
+        text: `Total assets valued at ₹${runningTotal.toLocaleString('en-IN')} for ${totalBooks} indexed books.`,
+        background: '#0F172A',
+        color: '#fff',
+        confirmButtonColor: '#3b82f6'
+      });
+      logAudit("FINANCIAL", `Performed deep asset scan: ${totalBooks} books, Total ₹${runningTotal}`);
+    } catch (e: any) {
+      Swal.fire({ icon: 'error', title: 'Asset Scan Failed', text: e.message });
+    } finally {
+      setIsAssetScanning(false);
+      setScanProgress(0);
     }
   };
 
@@ -2772,6 +2879,49 @@ export default function App() {
     );
   }
 
+  if (isAssetScanning) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-8 relative overflow-hidden">
+        {/* Matrix-like background effect */}
+        <div className="absolute inset-0 opacity-10 pointer-events-none">
+          <div className="h-full w-full bg-[radial-gradient(#3b82f6_1px,transparent_1px)] [background-size:20px_20px]"></div>
+        </div>
+        
+        <div className="relative z-10 w-full max-w-md text-center space-y-8">
+           <div className="w-24 h-24 bg-indigo-500/20 rounded-full flex items-center justify-center mx-auto border-2 border-indigo-500/50 animate-pulse">
+             <span className="text-5xl">📊</span>
+           </div>
+           
+           <div className="space-y-2">
+             <h2 className="text-2xl font-black text-white tracking-widest uppercase">Deep Audit Active</h2>
+             <p className="text-indigo-400 text-[10px] font-black uppercase tracking-[0.3em]">Scanning Financial Assets & Book Value</p>
+           </div>
+
+           <div className="space-y-4">
+             <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+               <div 
+                 className="h-full bg-gradient-to-r from-indigo-500 to-blue-400 dark:from-indigo-600 dark:to-blue-500 transition-all duration-300 ease-out flex items-center justify-end px-1"
+                 style={{ width: `${scanProgress}%` }}
+               >
+                 <div className="w-1 h-1 bg-white rounded-full animate-ping"></div>
+               </div>
+             </div>
+             <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-500">
+               <span>Registry Synchronization</span>
+               <span className="text-white">{scanProgress}% COMPLETE</span>
+             </div>
+           </div>
+
+           <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50">
+              <p className="text-[9px] text-slate-400 leading-relaxed font-medium uppercase italic">
+                Quantifying book value across 7,000+ indexed records. This process ensures absolute ledger accuracy for institutional reporting.
+              </p>
+           </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthorized) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 relative overflow-hidden font-sans">
@@ -2873,8 +3023,8 @@ export default function App() {
           <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Circulation</div>
           <ul className="list-none space-y-1 mb-6">
             {[
-              { id: "circulation", label: "Asset Ops", icon: "📋" },
-              { id: "issuedList", label: "Live Ledger", icon: "📑" },
+              { id: "circulation", label: t('assetOps'), icon: "📋" },
+              { id: "issuedList", label: t('liveLedger'), icon: "📑" },
               { id: "financials", label: t('finance'), icon: "💰" }
             ].map(tab => (
               <li
@@ -2894,7 +3044,7 @@ export default function App() {
           <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Community Projects</div>
           <ul className="list-none space-y-1 mb-6">
             {[
-              { id: "vayanavasantham", label: "Vayanavasantham", icon: "🏠" },
+              { id: "vayanavasantham", label: t('vvProject'), icon: "🏠" },
             ].map(tab => (
               <li
                 key={tab.id}
@@ -2913,10 +3063,10 @@ export default function App() {
           <div className="px-6 py-2 text-[10px] text-slate-500 font-bold uppercase tracking-widest">Engagement & Ops</div>
           <ul className="list-none space-y-1 mb-6">
             {[
-              { id: "engagement", label: "Engagement Hub", icon: "🔔" },
-              { id: "vouchers", label: "Voucher Hub", icon: "🎫" },
+              { id: "engagement", label: t('engagement'), icon: "🔔" },
+              { id: "vouchers", label: t('vouchers'), icon: "🎫" },
               { id: "shelfAudit", label: t('shelfAudit'), icon: "🗄️" },
-              { id: "map", label: "Store Mapping", icon: "🗺️" },
+              { id: "map", label: t('storeMapping'), icon: "🗺️" },
               { id: "settings", label: t('config'), icon: "⚙️" },
               { id: "reports", label: t('reports'), icon: "📈" },
               { id: "duplicates", label: t('duplicates'), icon: "👯" },
@@ -2963,7 +3113,7 @@ export default function App() {
                 🏛️
               </motion.div>
               <div className="text-left">
-                <h1 className="text-2xl font-black text-primary tracking-tighter leading-none mb-1">{lang === 'ml' ? translations.ml.portalSubtitle : translations.en.portalSubtitle}</h1>
+                <h1 className="text-2xl font-black text-primary tracking-tighter leading-none mb-1">{t('portalSubtitle')}</h1>
                 <p className="text-[10px] text-text-muted font-black uppercase tracking-[0.2em] flex items-center gap-2">
                   <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-500">REG NO: 1231</span>
                   <span className="w-1.5 h-1.5 bg-slate-200 rounded-full"></span>
@@ -3011,9 +3161,9 @@ export default function App() {
                     dbStatus === 'checking' ? 'bg-amber-500' :
                     'bg-red-500'
                   }`}></span>
-                  {dbStatus === 'connected' ? 'DATABASE: ONLINE' : 
-                  dbStatus === 'checking' ? 'DATABASE: SYNCING' :
-                  'DATABASE: OFFLINE'}
+                  {dbStatus === 'connected' ? t('dbOnline') : 
+                  dbStatus === 'checking' ? t('dbSyncing') :
+                  t('dbOffline')}
                 </div>
                 <div className="flex items-center gap-3">
                   <p className="text-2xl font-black text-slate-800 tracking-tighter tabular-nums font-mono">
@@ -3073,13 +3223,13 @@ export default function App() {
                       <div className="flex items-center justify-between mb-8 border-b pb-4 text-left">
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center text-xl">💸</div>
-                          <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Recent Transactions</h3>
+                          <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">{t('recentTransactions')}</h3>
                         </div>
-                        <button onClick={() => setActiveTab('accounts')} className="text-[10px] font-black text-primary uppercase tracking-widest hover:underline">View All</button>
+                        <button onClick={() => setActiveTab('accounts')} className="text-[10px] font-black text-primary uppercase tracking-widest hover:underline">{t('viewAll')}</button>
                       </div>
                       <div className="space-y-4">
                         {recentTrans.length === 0 ? (
-                          <p className="text-xs text-slate-400 italic text-center py-8">No recent financial events</p>
+                          <p className="text-xs text-slate-400 italic text-center py-8">{t('noRecentFinance')}</p>
                         ) : (
                           recentTrans.map((t, idx) => (
                             <div key={idx} className="flex items-center justify-between p-4 bg-slate-50/50 rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-colors">
@@ -5407,7 +5557,7 @@ export default function App() {
         {/* FINANCIAL LEDGER */}
         {activeTab === "financials" && (
           <div className="flex flex-col gap-8 animate-in fade-in duration-500">
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                <div className="bg-emerald-900 p-8 rounded-3xl text-white shadow-xl shadow-emerald-900/10 border-l-[8px] border-emerald-400">
                   <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-60 mb-2">Institutional Revenue</p>
                   <p className="text-4xl font-black tracking-tighter">₹{financialStats.total}</p>
@@ -5432,6 +5582,20 @@ export default function App() {
                     </div>
                     <span className="text-[10px] font-bold">{( (financialStats.fines / (financialStats.total || 1)) * 100 ).toFixed(0)}%</span>
                   </div>
+               </div>
+               <div className="bg-slate-900 p-8 rounded-3xl text-white shadow-xl shadow-slate-900/10 border-l-[8px] border-indigo-400 group relative overflow-hidden">
+                  <div className="relative z-10">
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-60 mb-2">Total Asset Value</p>
+                    <p className="text-4xl font-black tracking-tighter">₹{totalAssetValue > 0 ? totalAssetValue.toLocaleString('en-IN') : "---"}</p>
+                    <button 
+                      onClick={calculateTotalAssets}
+                      disabled={isAssetScanning}
+                      className="mt-4 text-[9px] font-black uppercase tracking-widest bg-white/10 hover:bg-white/20 py-2 px-4 rounded-full flex items-center gap-2 transition-all disabled:opacity-50"
+                    >
+                      {isAssetScanning ? "Calculating..." : "Scan Assets 🔍"}
+                    </button>
+                  </div>
+                  <div className="absolute -bottom-2 -right-2 text-5xl opacity-10 group-hover:rotate-12 transition-transform">💰</div>
                </div>
              </div>
 
