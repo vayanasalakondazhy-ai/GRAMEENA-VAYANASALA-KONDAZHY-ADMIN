@@ -409,10 +409,14 @@ export default function App() {
   const loadShelfBooks = useCallback(async (shelfNum: number) => {
     setIsShelfLoading(true);
     try {
-      let query = supabase
-        .from("books")
-        .select("*")
-        .eq("shelfnumber", String(shelfNum));
+      let query = supabase.from("books").select("*");
+      
+      if (shelfNum === 0) {
+        // Query for books with no shelf number (null, empty string, or explicit "0")
+        query = query.or('shelfnumber.is.null,shelfnumber.eq.,shelfnumber.eq.0');
+      } else {
+        query = query.eq("shelfnumber", String(shelfNum));
+      }
 
       if (shelfSearchCall.trim()) {
         query = query.ilike("callnumber", `%${shelfSearchCall.trim()}%`);
@@ -435,7 +439,7 @@ export default function App() {
   }, [shelfSearchCall, shelfSearchStock]);
 
   useEffect(() => {
-    if (!activeShelf) return;
+    if (activeShelf === null) return;
     const timer = setTimeout(() => {
       loadShelfBooks(activeShelf);
     }, 400); // Debounce typing
@@ -1322,6 +1326,8 @@ export default function App() {
         query = query.ilike('author', "%" + bookSearch + "%");
       } else if (searchType === 'stocknumber') {
         query = query.or(`stocknumber.ilike.%${bookSearch}%,isbn.ilike.%${bookSearch}%`);
+      } else if (searchType === 'shelfnumber' && bookSearch === "0") {
+        query = query.or('shelfnumber.is.null,shelfnumber.eq.,shelfnumber.eq.0');
       } else {
         query = query.ilike(searchType, "%" + bookSearch + "%");
       }
@@ -4241,7 +4247,8 @@ export default function App() {
                     <option value="OTHER">OTHER</option>
                   </select>
                   <select name="shelfnumber" required className="input-field shadow-sm border-blue-200 border">
-                    <option value="">Assign Shelf (1-30)</option>
+                    <option value="">Shelf Assignment</option>
+                    <option value="0">0 (Unassigned)</option>
                     {Array.from({ length: 30 }, (_, i) => (
                       <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
                     ))}
@@ -4302,7 +4309,8 @@ export default function App() {
                     <option value="OTHER">OTHER</option>
                   </select>
                   <select name="shelfnumber" className="input-field shadow-sm">
-                    <option value="">Select Shelf (1-30)</option>
+                    <option value="">Shelf Assignment</option>
+                    <option value="0">0 (Unassigned)</option>
                     {Array.from({ length: 30 }, (_, i) => (
                       <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
                     ))}
@@ -5795,10 +5803,13 @@ export default function App() {
                 </div>
              </div>
 
-             <div className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-6 gap-4">
-                {Array.from({ length: 30 }, (_, i) => {
-                  const shelfId = String(i + 1);
-                  const booksOnShelf = books.filter(b => String(b.shelfnumber) === shelfId);
+              <div className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-6 gap-4">
+                {Array.from({ length: 31 }, (_, i) => {
+                  const shelfId = String(i);
+                  const isUnassigned = i === 0;
+                  const booksOnShelf = isUnassigned
+                    ? books.filter(b => !b.shelfnumber || String(b.shelfnumber) === "0" || String(b.shelfnumber).trim() === "")
+                    : books.filter(b => String(b.shelfnumber) === shelfId);
                   const capacity = 50; // Arbitrary safe limit for visual
                   const percent = Math.min(Math.round((booksOnShelf.length / capacity) * 100), 100);
 
@@ -6170,7 +6181,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  {activeShelf && (
+                  {activeShelf !== null && (
                     <div className="bg-indigo-900 px-6 py-3 rounded-2xl shadow-xl shadow-indigo-900/10 flex items-center gap-6">
                       <div className="text-left">
                         <span className="text-[10px] font-black text-indigo-200/50 uppercase tracking-widest block leading-tight">{t('activeView')}</span>
@@ -6194,7 +6205,7 @@ export default function App() {
                 <div className="bg-slate-900 rounded-[32px] p-6 shadow-2xl">
                   <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-4 ml-2">{t('selectRackLevel')}</h3>
                   <div className="grid grid-cols-5 gap-2">
-                    {Array.from({ length: 30 }, (_, i) => i + 1).map((shelf) => {
+                    {Array.from({ length: 31 }, (_, i) => i).map((shelf) => {
                       const isSelected = activeShelf === shelf;
                       return (
                         <button
@@ -6228,7 +6239,7 @@ export default function App() {
                     <div className="w-12 h-12 border-4 border-slate-100 border-t-primary rounded-full animate-spin"></div>
                     <span className="text-[10px] font-black uppercase tracking-widest">Scanning Rack Data...</span>
                   </div>
-                ) : activeShelf ? (
+                ) : activeShelf !== null ? (
                   <div className="section-card bg-white overflow-hidden p-0 border-slate-100 shadow-xl">
                     <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
                       <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">
@@ -6552,7 +6563,8 @@ export default function App() {
               </select>
               <input name="category" defaultValue={editBookModal.category} placeholder="Category" onFocus={handleInputFocus} className="input-field" />
               <select name="shelfnumber" defaultValue={editBookModal.shelfnumber} className="input-field">
-                <option value="">Select Shelf (1-30)</option>
+                <option value="">Shelf Assignment</option>
+                <option value="0">0 (Unassigned)</option>
                 {Array.from({ length: 30 }, (_, i) => (
                   <option key={i + 1} value={String(i + 1)}>{i + 1}</option>
                 ))}
