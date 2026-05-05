@@ -86,13 +86,38 @@ const useSupabaseHealth = () => {
   return { status, errorMessage };
 };
 
+const Clock = React.memo(() => {
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="flex items-center gap-3">
+      <p className="text-2xl font-black text-slate-800 tracking-tighter tabular-nums font-mono">
+        {currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })}
+      </p>
+      <div className="h-4 w-[2px] bg-slate-200 rounded-full"></div>
+      <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest pt-0.5">
+        {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+      </p>
+    </div>
+  );
+});
+
 export default function App() {
   const { status: dbStatus, errorMessage: dbError } = useSupabaseHealth();
   const [activeTab, setActiveTab] = useState("dashboard");
+
+  const handleSetActiveTab = useCallback((tab: string) => {
+    setActiveTab(tab);
+  }, []);
+
   const [duplicateGroups, setDuplicateGroups] = useState<any[]>([]);
   const [scanningDuplicates, setScanningDuplicates] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
   const [isFullScan, setIsFullScan] = useState(false);
   const [verifiedCopies, setVerifiedCopies] = useState<Set<string>>(new Set());
   const [bookBatches, setBookBatches] = useState<string[]>([]);
@@ -348,9 +373,6 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [financialStats, setFinancialStats] = useState({ total: 0, fines: 0, subs: 0 });
-  const [totalAssetValue, setTotalAssetValue] = useState<number>(0);
-  const [isAssetScanning, setIsAssetScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0);
   const [vouchers, setVouchers] = useState<any[]>([]);
   const [voucherSearch, setVoucherSearch] = useState("");
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
@@ -375,8 +397,14 @@ export default function App() {
   const [isShelfLoading, setIsShelfLoading] = useState(false);
   const [shelfSearchCall, setShelfSearchCall] = useState("");
   const [shelfSearchStock, setShelfSearchStock] = useState("");
-  const [customIssueDate, setCustomIssueDate] = useState(new Date().toISOString().split('T')[0]);
-  const [customReturnDate, setCustomReturnDate] = useState(new Date().toISOString().split('T')[0]);
+  const [customIssueDate, setCustomIssueDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [customReturnDate, setCustomReturnDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
 
   const loadShelfBooks = useCallback(async (shelfNum: number) => {
     setIsShelfLoading(true);
@@ -436,6 +464,9 @@ export default function App() {
   };
   const [isImporting, setIsImporting] = useState(false);
   const [lang, setLang] = useState<"en" | "ml">("en");
+  const [booksPage, setBooksPage] = useState(1);
+  const [membersPage, setMembersPage] = useState(1);
+  const PAGE_SIZE = 40;
 
   // Translation Dictionary
   const translations = {
@@ -490,7 +521,23 @@ export default function App() {
       noRecentFinance: "No recent financial events",
       dbOnline: "DATABASE: ONLINE",
       dbSyncing: "DATABASE: SYNCING",
-      dbOffline: "DATABASE: OFFLINE"
+      dbOffline: "DATABASE: OFFLINE",
+      shelfNavigator: "SHELF NAVIGATOR",
+      selectRackLevel: "Select Rack Level",
+      activeView: "Active View",
+      shelfCount: "Book Count",
+      shelf: "Shelf",
+      coreIdentity: "Core Identity",
+      authTier: "Authorization Tier",
+      commandControl: "Command Control",
+      readyScan: "Ready for Scanning",
+      manualEntry: "Manual Entry",
+      barcodeScan: "Barcode Scanner",
+      executeIssue: "Execute Assignment",
+      verifyReturn: "Verify & Clear Log",
+      analytics: "Analytics",
+      history: "History",
+      idCard: "ID Card"
     },
     ml: {
       dashboard: "ഡാഷ്‌ബോർഡ്",
@@ -537,11 +584,100 @@ export default function App() {
       membersHub: "അംഗങ്ങളുടെ വിവരങ്ങൾ",
       bookRegistry: "പുസ്തക രജിസ്റ്റർ",
       circulation_desk: "വിതരണ വിഭാഗം",
-      financial_ledger: "സാമ്പത്തിക കണക്കുകൾ"
+      financial_ledger: "സാമ്പത്തിക കണക്കുകൾ",
+      recentTransactions: "സമീപകാല ഇടപാടുകൾ",
+      viewAll: "എല്ലാം കാണുക",
+      noRecentFinance: "സാമ്പത്തിക ഇടപാടുകൾ ലഭ്യമല്ല",
+      dbOnline: "ഡാറ്റാബേസ്: ഓൺലൈൻ",
+      dbSyncing: "ഡാറ്റാബേസ്: സിങ്ക് ചെയ്യുന്നു",
+      dbOffline: "ഡാറ്റാബേസ്: ഓഫ്ലൈൻ",
+      shelfNavigator: "ഷെൽഫ് നാവിഗേറ്റർ",
+      selectRackLevel: "റാക്ക് തിരഞ്ഞെടുക്കുക",
+      activeView: "കാണുന്ന ഷെൽഫ്",
+      shelfCount: "പുസ്തകങ്ങളുടെ എണ്ണം",
+      shelf: "ഷെൽഫ്",
+      coreIdentity: "അടിസ്ഥാന വിവരങ്ങൾ",
+      authTier: "അംഗത്വ നില",
+      commandControl: "നിയന്ത്രണങ്ങൾ",
+      readyScan: "സ്കാൻ ചെയ്യാൻ തയ്യാറാണ്",
+      manualEntry: "നേരിട്ട് ചേർക്കുക",
+      barcodeScan: "ബാർകോഡ് സ്കാനർ",
+      executeIssue: "വിതരണം നടപ്പിലാക്കുക",
+      verifyReturn: "തിരിച്ചെടുക്കൽ സ്ഥിരീകരിക്കുക",
+      analytics: "വിശകലനം",
+      history: "ചരിത്രം",
+      idCard: "ഐഡി കാർഡ്"
     }
   };
 
   const t = (key: keyof typeof translations['en']) => translations[lang][key] || key;
+
+  const [totalAssetValue, setTotalAssetValue] = useState<number>(0);
+  const [isAssetScanning, setIsAssetScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
+
+  const calculateTotalAssets = useCallback(async () => {
+    setIsAssetScanning(true);
+    setScanProgress(0);
+    let total = 0;
+    
+    // Batch scan to avoid memory issues and network timeouts
+    const batchSize = 1000;
+    let offset = 0;
+    let hasMore = true;
+
+    try {
+      // Get total count for progress tracking
+      const { count } = await supabase.from('books').select('*', { count: 'exact', head: true });
+      const totalCount = count || 0;
+
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('books')
+          .select('price')
+          .range(offset, offset + batchSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        data.forEach(b => {
+          // Clean the price string: remove currency symbols, commas, etc.
+          const cleanPrice = String(b.price || '0')
+            .replace(/[₹,]/g, '')
+            .trim();
+          const priceVal = parseFloat(cleanPrice);
+          if (!isNaN(priceVal)) total += priceVal;
+        });
+
+        offset += batchSize;
+        if (totalCount > 0) {
+          setScanProgress(Math.min(100, Math.round((offset / totalCount) * 100)));
+        }
+
+        if (data.length < batchSize) hasMore = false;
+        
+        // Brief pause to allow the browser to remain responsive
+        await new Promise(r => setTimeout(r, 30));
+      }
+
+      setTotalAssetValue(total);
+      Swal.fire({
+        icon: 'success',
+        title: t('auditComplete'),
+        text: `Indexed ${totalCount} assets. Cumulative Valuation: ₹${total.toLocaleString('en-IN')}`,
+        confirmButtonColor: '#3b82f6'
+      });
+    } catch (error: any) {
+      console.error("Asset Scan Error:", error);
+      Swal.fire('Scan Halted', error.message, 'error');
+    } finally {
+      setIsAssetScanning(false);
+      setScanProgress(0);
+    }
+  }, [t]);
   const [showCamera, setShowCamera] = useState(false);
   const [cameras, setCameras] = useState<any[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<string>("");
@@ -765,71 +901,6 @@ export default function App() {
     }
   };
 
-  const calculateTotalAssets = async () => {
-    setIsAssetScanning(true);
-    setScanProgress(0);
-    setTotalAssetValue(0);
-    
-    try {
-      // 1. Get total count first
-      const { count, error: countError } = await supabase
-        .from("books")
-        .select("*", { count: "exact", head: true });
-      
-      if (countError) throw countError;
-      const totalBooks = count || 0;
-      
-      if (totalBooks === 0) {
-        Swal.fire({ icon: 'info', title: 'No Data', text: 'No books found in the registry to calculate value.' });
-        return;
-      }
-
-      let runningTotal = 0;
-      const batchSize = 1000;
-      let offset = 0;
-
-      while (offset < totalBooks) {
-        const { data, error } = await supabase
-          .from("books")
-          .select("price")
-          .range(offset, offset + batchSize - 1);
-
-        if (error) throw error;
-
-        const batchSum = (data || []).reduce((acc, curr) => {
-          const priceStr = String(curr.price || "0").replace(/[^0-9.]/g, "");
-          const priceNum = parseFloat(priceStr);
-          return acc + (isNaN(priceNum) ? 0 : priceNum);
-        }, 0);
-
-        runningTotal += batchSum;
-        offset += batchSize;
-        
-        const progress = Math.min(Math.round((offset / totalBooks) * 100), 100);
-        setScanProgress(progress);
-        
-        // Brief delay to prevent UI thread lock
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-      
-      setTotalAssetValue(runningTotal);
-      
-      Swal.fire({
-        icon: 'success',
-        title: 'Inventory Audit Complete',
-        text: `Total assets valued at ₹${runningTotal.toLocaleString('en-IN')} for ${totalBooks} indexed books.`,
-        background: '#0F172A',
-        color: '#fff',
-        confirmButtonColor: '#3b82f6'
-      });
-      logAudit("FINANCIAL", `Performed deep asset scan: ${totalBooks} books, Total ₹${runningTotal}`);
-    } catch (e: any) {
-      Swal.fire({ icon: 'error', title: 'Asset Scan Failed', text: e.message });
-    } finally {
-      setIsAssetScanning(false);
-      setScanProgress(0);
-    }
-  };
 
   const loadUserHistory = useCallback(async (phone: string) => {
     setHistoryLoading(true);
@@ -1024,7 +1095,7 @@ export default function App() {
   }, [isManglishEnabled, focusedInput]);
 
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     const result = await Swal.fire({
       title: 'Deauthorizing Session',
       text: 'Disconnecting from Digital Registry Core...',
@@ -1040,7 +1111,7 @@ export default function App() {
       await firebaseLogout();
       setIsAuthorized(false);
     }
-  };
+  }, []);
 
   const handleGoogleLogin = async () => {
     try {
@@ -1217,7 +1288,30 @@ export default function App() {
   }, [loadMembers]);
 
 
-  // Books Search
+  const pagedMembers = React.useMemo(() => {
+    const start = (membersPage - 1) * PAGE_SIZE;
+    return filteredMembers.slice(start, start + PAGE_SIZE);
+  }, [filteredMembers, membersPage]);
+
+  const filteredBooks = React.useMemo(() => {
+    if (bookFilter === "all") return books;
+    
+    if (bookFilter === "no-isbn") {
+      return books.filter(b => !b.isbn || b.isbn.length < 5);
+    }
+
+    return books;
+  }, [books, bookFilter]);
+
+  const pagedBooks = React.useMemo(() => {
+    const start = (booksPage - 1) * PAGE_SIZE;
+    return filteredBooks.slice(start, start + PAGE_SIZE);
+  }, [filteredBooks, booksPage]);
+
+  // Reset page on search
+  useEffect(() => { setMembersPage(1); }, [memberSearch, memberFilterSub, memberFilterSubTab, memberFilterDate]);
+  useEffect(() => { setBooksPage(1); }, [bookSearch, bookFilter]);
+
   const searchBooks = useCallback(async () => {
     let query = supabase.from("books").select("*");
     
@@ -1270,19 +1364,12 @@ export default function App() {
 
   useEffect(() => {
     if (activeTab === 'books') {
-      searchBooks();
+      const timer = setTimeout(() => {
+        searchBooks();
+      }, 400);
+      return () => clearTimeout(timer);
     }
-  }, [activeTab, searchBooks, bookFilter]);
-
-  const filteredBooks = React.useMemo(() => {
-    if (bookFilter === "all") return books;
-    
-    if (bookFilter === "no-isbn") {
-      return books.filter(b => !b.isbn || b.isbn.length < 5);
-    }
-
-    return books;
-  }, [books, bookFilter]);
+  }, [activeTab, searchBooks, bookFilter, bookSearch, searchType]);
 
   // Issued List
   const loadIssued = useCallback(async () => {
@@ -1295,10 +1382,15 @@ export default function App() {
     const { data: vvData } = await supabase.from("vayanavasantham_issued").select("*");
 
     const processIssued = async (data: any[], project?: string) => {
-      if (!data) return [];
-      return await Promise.all(data.map(async (d) => {
-        const { data: bData } = await supabase.from("books").select("*").eq("id", d.book_id).maybeSingle();
-        const b = bData || {};
+      if (!data || data.length === 0) return [];
+      
+      const bookIds = data.map(d => d.book_id);
+      const { data: booksData } = await supabase.from("books").select("*").in("id", bookIds);
+      const bookMap: Record<string, any> = {};
+      booksData?.forEach(b => bookMap[b.id] = b);
+
+      return data.map((d) => {
+        const b = bookMap[d.book_id] || {};
         const user = userMap[d.user_phone] || {};
         const today = new Date();
         const due = new Date(d.due_date);
@@ -1309,7 +1401,7 @@ export default function App() {
           fine = daysOverdue * fineAmount;
         }
         return { ...d, book: b, user, status, label, fine, project: project || "Regular" };
-      }));
+      });
     };
 
     const regularIssued = await processIssued(issuedData || []);
@@ -1325,10 +1417,14 @@ export default function App() {
     usersData?.forEach(u => userMap[u.phone] = u);
 
     const { data: issuedData } = await supabase.from("vayanavasantham_issued").select("*");
-    if (issuedData) {
-      const fullData = await Promise.all(issuedData.map(async (d) => {
-        const { data: bData } = await supabase.from("books").select("*").eq("id", d.book_id).maybeSingle();
-        const b = bData || {};
+    if (issuedData && issuedData.length > 0) {
+      const bookIds = issuedData.map(d => d.book_id);
+      const { data: booksData } = await supabase.from("books").select("*").in("id", bookIds);
+      const bookMap: Record<string, any> = {};
+      booksData?.forEach(b => bookMap[b.id] = b);
+
+      const fullData = issuedData.map((d) => {
+        const b = bookMap[d.book_id] || {};
         const user = userMap[d.user_phone] || {};
         const today = new Date();
         const due = new Date(d.due_date);
@@ -1339,7 +1435,7 @@ export default function App() {
           fine = daysOverdue * fineAmount;
         }
         return { ...d, book: b, user, status, label, fine, project: 'Vayanavasantham' };
-      }));
+      });
       setVayanavasanthamIssued(fullData);
     }
     setIsVayanavasanthamLoading(false);
@@ -1351,7 +1447,7 @@ export default function App() {
     const { data: existing } = await supabase.from("vayanavasantham_issued").select("*").eq("book_id", selectedIssueBook.id).maybeSingle();
     if (existing) return Swal.fire({ icon: 'error', title: 'Oops!', text: 'This book is already issued under this project.' });
 
-    const now = customIssueDate ? new Date(customIssueDate) : new Date();
+    const now = customIssueDate ? new Date(customIssueDate + "T12:00:00") : new Date();
     const due = new Date(now);
     due.setMonth(due.getMonth() + 1);
 
@@ -2023,7 +2119,8 @@ export default function App() {
     const { data: existing } = await supabase.from("issued_books").select("*").eq("book_id", selectedIssueBook.id).maybeSingle();
     if (existing) return Swal.fire({ icon: 'error', title: 'Oops!', text: 'This book is already issued.' });
 
-    const now = customIssueDate ? new Date(customIssueDate) : new Date();
+    // Use lunchtime to avoid date flips due to timezone offsets when using .toISOString()
+    const now = customIssueDate ? new Date(customIssueDate + "T12:00:00") : new Date();
     const due = new Date(now);
     due.setMonth(due.getMonth() + 1);
 
@@ -2039,7 +2136,8 @@ export default function App() {
     else {
       Swal.fire({ icon: 'success', title: 'Book Issued!', timer: 1500, showConfirmButton: false });
       setSelectedIssueBook(null);
-      setCustomIssueDate(new Date().toISOString().split('T')[0]);
+      const today = new Date();
+      setCustomIssueDate(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`);
       setIssueSearchVal("");
       setFoundIssueBooks([]);
       loadIssued();
@@ -2823,11 +2921,6 @@ export default function App() {
 
   // Lifecycle
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     loadDashboard();
     loadMembers();
     loadIssued();
@@ -3008,7 +3101,7 @@ export default function App() {
             ].map(tab => (
               <li
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleSetActiveTab(tab.id)}
                 className={`px-6 py-2.5 text-sm cursor-pointer transition-all flex items-center gap-3 border-r-4 ${
                   activeTab === tab.id 
                     ? 'bg-white/10 text-white border-accent font-semibold' 
@@ -3029,7 +3122,7 @@ export default function App() {
             ].map(tab => (
               <li
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleSetActiveTab(tab.id)}
                 className={`px-6 py-2.5 text-sm cursor-pointer transition-all flex items-center gap-3 border-r-4 ${
                   activeTab === tab.id 
                     ? 'bg-white/10 text-white border-accent font-semibold' 
@@ -3048,7 +3141,7 @@ export default function App() {
             ].map(tab => (
               <li
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleSetActiveTab(tab.id)}
                 className={`px-6 py-2.5 text-sm cursor-pointer transition-all flex items-center gap-3 border-r-4 ${
                   activeTab === tab.id 
                     ? 'bg-white/10 text-white border-accent font-semibold' 
@@ -3074,7 +3167,7 @@ export default function App() {
             ].map(tab => (
               <li
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleSetActiveTab(tab.id)}
                 className={`px-6 py-2.5 text-sm cursor-pointer transition-all flex items-center gap-3 border-r-4 ${
                   activeTab === tab.id 
                     ? 'bg-white/10 text-white border-accent font-semibold' 
@@ -3165,26 +3258,18 @@ export default function App() {
                   dbStatus === 'checking' ? t('dbSyncing') :
                   t('dbOffline')}
                 </div>
-                <div className="flex items-center gap-3">
-                  <p className="text-2xl font-black text-slate-800 tracking-tighter tabular-nums font-mono">
-                    {currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })}
-                  </p>
-                  <div className="h-4 w-[2px] bg-slate-200 rounded-full"></div>
-                  <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest pt-0.5">
-                    {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-                  </p>
+                   <Clock />
                 </div>
               </div>
-            </div>
           </header>
           
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
-              initial={{ opacity: 0, y: 15, scale: 0.99 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.99 }}
-              transition={{ duration: 0.4, cubicBezier: [0.16, 1, 0.3, 1] }}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -5 }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
               className="flex-grow flex flex-col"
             >
               {/* DASHBOARD */}
@@ -3626,13 +3711,13 @@ export default function App() {
                   <table className="w-full border-separate border-spacing-0">
                     <thead className="sticky top-0 bg-white/95 backdrop-blur-xl z-10">
                       <tr className="shadow-sm">
-                        <th className="px-8 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100">Core Identity</th>
-                        <th className="px-8 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100">Authorization Tier</th>
-                        <th className="px-8 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100">Command Control</th>
+                        <th className="px-8 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100">{t('coreIdentity')}</th>
+                        <th className="px-8 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100">{t('authTier')}</th>
+                        <th className="px-8 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-100">{t('commandControl')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {filteredMembers.length === 0 ? (
+                      {pagedMembers.length === 0 ? (
                         <tr>
                           <td colSpan={3} className="px-8 py-20 text-center">
                             <div className="flex flex-col items-center gap-4 opacity-30">
@@ -3651,12 +3736,12 @@ export default function App() {
                           </td>
                         </tr>
                       ) : (
-                        filteredMembers.map((u, idx) => (
+                        pagedMembers.map((u, idx) => (
                           <motion.tr 
                             key={u.id || idx} 
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: idx * 0.03 }}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ delay: Math.min(idx * 0.01, 0.3) }}
                             className={`group hover:bg-slate-50/50 transition-all duration-300 ${
                               (u.phone?.includes('MISSING-') || u.phone?.includes('-DUP-')) ? 'bg-amber-50/50' : ''
                             }`}
@@ -3755,6 +3840,29 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
+                {filteredMembers.length > PAGE_SIZE && (
+                  <div className="px-8 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      Showing {(membersPage - 1) * PAGE_SIZE + 1} to {Math.min(membersPage * PAGE_SIZE, filteredMembers.length)} of {filteredMembers.length}
+                    </p>
+                    <div className="flex gap-2">
+                      <button 
+                        disabled={membersPage === 1}
+                        onClick={() => setMembersPage(p => Math.max(1, p - 1))}
+                        className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-30 hover:border-primary transition-all shadow-sm"
+                      >
+                        Previous
+                      </button>
+                      <button 
+                        disabled={membersPage * PAGE_SIZE >= filteredMembers.length}
+                        onClick={() => setMembersPage(p => p + 1)}
+                        className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-30 hover:border-primary transition-all shadow-sm"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -3809,7 +3917,6 @@ export default function App() {
                         placeholder={`SEARCH BY ${searchType.toUpperCase()}...`} 
                         value={bookSearch}
                         onChange={(e) => setBookSearch(e.target.value)}
-                        onKeyUp={searchBooks}
                         className="pl-14 pr-6 py-4 bg-white border-2 border-slate-100 rounded-2xl text-xs outline-none focus:border-accent transition-all w-80 shadow-lg shadow-primary/5 uppercase font-black tracking-widest placeholder:opacity-30"
                       />
                       <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl grayscale group-focus-within:grayscale-0 transition-all">🔍</span>
@@ -3839,12 +3946,12 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {filteredBooks.map((b, idx) => (
+                    {pagedBooks.map((b, idx) => (
                       <motion.tr 
                         key={b.id} 
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: idx * 0.02 }}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: Math.min(idx * 0.005, 0.3) }}
                         className="group hover:bg-slate-50/80 transition-all"
                       >
                         <td className="px-6 py-6 text-[11px] font-mono text-slate-400 font-black text-center">{idx + 1}</td>
@@ -3887,6 +3994,29 @@ export default function App() {
                     ))}
                   </tbody>
                 </table>
+                {filteredBooks.length > PAGE_SIZE && (
+                  <div className="px-8 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      Showing {(booksPage - 1) * PAGE_SIZE + 1} to {Math.min(booksPage * PAGE_SIZE, filteredBooks.length)} of {filteredBooks.length}
+                    </p>
+                    <div className="flex gap-2">
+                      <button 
+                        disabled={booksPage === 1}
+                        onClick={() => setBooksPage(p => Math.max(1, p - 1))}
+                        className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-30 hover:border-primary transition-all shadow-sm"
+                      >
+                        Previous
+                      </button>
+                      <button 
+                        disabled={booksPage * PAGE_SIZE >= filteredBooks.length}
+                        onClick={() => setBooksPage(p => p + 1)}
+                        className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-30 hover:border-primary transition-all shadow-sm"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -3902,7 +4032,7 @@ export default function App() {
                   addMode === 'manual' ? 'bg-white shadow-md text-primary scale-105' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Manual Entry
+                {t('manualEntry')}
               </button>
               <button 
                 onClick={() => { setAddMode('barcode'); setScannedBook(null); }}
@@ -3910,7 +4040,7 @@ export default function App() {
                   addMode === 'barcode' ? 'bg-white shadow-md text-accent scale-105' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Barcode Scanner
+                {t('barcodeScan')}
               </button>
             </div>
 
@@ -3919,7 +4049,7 @@ export default function App() {
                 <div className="w-24 h-24 bg-accent/10 text-accent rounded-3xl flex items-center justify-center text-4xl mb-6 animate-pulse border-2 border-accent/10">
                   📚
                 </div>
-                <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Ready for Scanning</h3>
+                <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">{t('readyScan')}</h3>
                 <p className="text-xs text-text-muted mt-2 max-w-xs mx-auto leading-relaxed">
                   Focus your scanner on the book's 13-digit ISBN barcode or use your device's camera.
                 </p>
@@ -5497,7 +5627,7 @@ export default function App() {
                       className="input-field text-[11px] font-bold"
                     />
                   </div>
-                  <button onClick={issueBook} className="bg-primary text-white w-full py-4 rounded-2xl uppercase font-black text-[11px] tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">Execute Assignment Entry</button>
+                  <button onClick={issueBook} className="bg-primary text-white w-full py-4 rounded-2xl uppercase font-black text-[11px] tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">{t('executeIssue')}</button>
                 </div>
               </div>
             ) : (
@@ -5547,7 +5677,7 @@ export default function App() {
                       className="input-field text-[11px] font-bold"
                     />
                   </div>
-                  <button onClick={returnBook} className="bg-primary text-white w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">Verify & Clear Log</button>
+                  <button onClick={returnBook} className="bg-primary text-white w-full py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] transition-all active:scale-[0.98]">{t('verifyReturn')}</button>
                 </div>
               </div>
             )}
@@ -5584,16 +5714,21 @@ export default function App() {
                   </div>
                </div>
                <div className="bg-slate-900 p-8 rounded-3xl text-white shadow-xl shadow-slate-900/10 border-l-[8px] border-indigo-400 group relative overflow-hidden">
-                  <div className="relative z-10">
-                    <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-60 mb-2">Total Asset Value</p>
+                  <div className="relative z-10 text-left">
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-60 mb-2">{t('assetValue')}</p>
                     <p className="text-4xl font-black tracking-tighter">₹{totalAssetValue > 0 ? totalAssetValue.toLocaleString('en-IN') : "---"}</p>
                     <button 
                       onClick={calculateTotalAssets}
                       disabled={isAssetScanning}
-                      className="mt-4 text-[9px] font-black uppercase tracking-widest bg-white/10 hover:bg-white/20 py-2 px-4 rounded-full flex items-center gap-2 transition-all disabled:opacity-50"
+                      className="mt-4 text-[9px] font-black uppercase tracking-widest bg-white/10 hover:bg-white/20 py-2.5 px-6 rounded-full flex items-center gap-2 transition-all disabled:opacity-50 border border-white/5"
                     >
-                      {isAssetScanning ? "Calculating..." : "Scan Assets 🔍"}
+                      {isAssetScanning ? `🛰️ SCANNING ${scanProgress}%` : t('scanAssets') + " 🔍"}
                     </button>
+                    {isAssetScanning && (
+                      <div className="mt-3 h-1 w-full bg-white/10 rounded-full overflow-hidden">
+                        <div className="h-full bg-accent transition-all duration-300" style={{ width: `${scanProgress}%` }}></div>
+                      </div>
+                    )}
                   </div>
                   <div className="absolute -bottom-2 -right-2 text-5xl opacity-10 group-hover:rotate-12 transition-transform">💰</div>
                </div>
@@ -5667,38 +5802,40 @@ export default function App() {
                   const capacity = 50; // Arbitrary safe limit for visual
                   const percent = Math.min(Math.round((booksOnShelf.length / capacity) * 100), 100);
 
-                  return (
-                    <motion.div 
-                      key={shelfId}
-                      whileHover={{ scale: 1.02, y: -4 }}
-                      className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl transition-all cursor-pointer group"
-                      onClick={() => {
-                        setBookSearch(shelfId);
-                        setSearchType("shelfnumber");
-                        setActiveTab("books");
-                      }}
-                    >
-                      <div className="flex justify-between items-start mb-3">
-                        <span className="text-[10px] font-black text-slate-400 group-hover:text-primary transition-colors">SHELF #{shelfId}</span>
-                        <span className="text-xs">📂</span>
-                      </div>
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-end">
-                           <p className="text-2xl font-black tracking-tighter text-slate-800 tabular-nums">{booksOnShelf.length}</p>
-                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{percent}% FULL</p>
-                        </div>
-                        <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden">
-                           <div 
-                             className={`h-full transition-all duration-1000 ${percent > 90 ? 'bg-red-500' : percent > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`} 
-                             style={{ width: `${percent}%` }}
-                           ></div>
-                        </div>
-                        <p className="text-[8px] text-slate-400 font-medium italic group-hover:text-slate-600 transition-colors uppercase tracking-tighter">
-                          {booksOnShelf.length > 0 ? "Inspect Assets →" : "Available Space"}
-                        </p>
-                      </div>
-                    </motion.div>
-                  );
+                   return (
+                     <motion.div 
+                       key={shelfId}
+                       whileHover={{ scale: 1.02, y: -4 }}
+                       className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-xl transition-all cursor-pointer group"
+                       onClick={() => {
+                         setBookSearch(shelfId);
+                         setSearchType("shelfnumber");
+                         setActiveTab("books");
+                       }}
+                     >
+                       <div className="flex justify-between items-start mb-3">
+                         <span className="text-[10px] font-black text-slate-400 group-hover:text-primary transition-colors uppercase tracking-widest">{t('shelf')} #{shelfId}</span>
+                         <div className="px-2 py-0.5 bg-slate-50 text-[9px] font-black rounded-lg border border-slate-100 group-hover:bg-primary/5 transition-colors">
+                           {booksOnShelf.length} UNIT{booksOnShelf.length !== 1 ? 'S' : ''}
+                         </div>
+                       </div>
+                       <div className="space-y-3">
+                         <div className="flex justify-between items-end">
+                            <p className="text-2xl font-black tracking-tighter text-slate-800 tabular-nums">{booksOnShelf.length}</p>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{percent}% LOAD</p>
+                         </div>
+                         <div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full transition-all duration-1000 ${percent > 90 ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]' : percent > 50 ? 'bg-amber-500' : 'bg-emerald-500'}`} 
+                              style={{ width: `${percent}%` }}
+                            ></div>
+                         </div>
+                         <p className="text-[8px] text-slate-400 font-medium italic group-hover:text-slate-600 transition-colors uppercase tracking-tighter">
+                           {booksOnShelf.length > 0 ? "Inspect Assets →" : "Available Space"}
+                         </p>
+                       </div>
+                     </motion.div>
+                   );
                 })}
              </div>
 
@@ -5725,6 +5862,7 @@ export default function App() {
                     <th className="table-header">Asset</th>
                     <th className="table-header">Member</th>
                     <th className="table-header font-bold uppercase tracking-widest text-[9px]">Project</th>
+                    <th className="table-header">Issue Date</th>
                     <th className="table-header">Due Date</th>
                     <th className="table-header">Fine</th>
                     <th className="table-header text-right">Status</th>
@@ -5745,7 +5883,8 @@ export default function App() {
                           {d.project}
                         </span>
                       </td>
-                      <td className="table-cell font-mono text-xs font-bold text-text-muted">{d.due_date?.split("T")[0]}</td>
+                      <td className="table-cell font-mono text-xs font-bold text-slate-400 italic">{d.issue_date?.split("T")[0]}</td>
+                      <td className="table-cell font-mono text-xs font-bold text-primary underline underline-offset-2">{d.due_date?.split("T")[0]}</td>
                       <td className="table-cell text-error font-black">₹{d.fine}</td>
                       <td className="table-cell text-right">
                         <span className={`status-pill ${d.status === 'issued' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
@@ -5996,7 +6135,7 @@ export default function App() {
           <div className="flex flex-col gap-8 animate-in slide-in-from-bottom-4 duration-500 pb-20">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm">
                 <div>
-                  <h2 className="text-3xl font-black text-slate-800 tracking-tighter">SHELF NAVIGATOR</h2>
+                  <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase">{t('shelfNavigator')}</h2>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1">Cross-Check Digital Data against Physical Rack Storage</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
@@ -6032,9 +6171,18 @@ export default function App() {
                     )}
                   </div>
                   {activeShelf && (
-                    <div className="bg-indigo-900 px-6 py-3 rounded-2xl shadow-xl shadow-indigo-900/10">
-                      <span className="text-[10px] font-black text-indigo-200/50 uppercase tracking-widest block">Active View</span>
-                      <span className="text-lg font-black text-white tracking-tight leading-none">Shelf {activeShelf}</span>
+                    <div className="bg-indigo-900 px-6 py-3 rounded-2xl shadow-xl shadow-indigo-900/10 flex items-center gap-6">
+                      <div className="text-left">
+                        <span className="text-[10px] font-black text-indigo-200/50 uppercase tracking-widest block leading-tight">{t('activeView')}</span>
+                        <span className="text-lg font-black text-white tracking-tight leading-none uppercase">{t('shelf')} {activeShelf}</span>
+                      </div>
+                      <div className="w-[1px] h-8 bg-indigo-500/30"></div>
+                      <div className="text-left">
+                        <span className="text-[10px] font-black text-indigo-200/50 uppercase tracking-widest block leading-tight">{t('shelfCount')}</span>
+                        <span className="text-2xl font-black text-accent tracking-tighter leading-none animate-in zoom-in duration-500 block">
+                          {shelfBooks.length}
+                        </span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -6044,7 +6192,7 @@ export default function App() {
               {/* Shelf Selection Grid */}
               <div className="lg:col-span-1 space-y-4">
                 <div className="bg-slate-900 rounded-[32px] p-6 shadow-2xl">
-                  <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-4 ml-2">Select Rack Level</h3>
+                  <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-4 ml-2">{t('selectRackLevel')}</h3>
                   <div className="grid grid-cols-5 gap-2">
                     {Array.from({ length: 30 }, (_, i) => i + 1).map((shelf) => {
                       const isSelected = activeShelf === shelf;
@@ -6052,13 +6200,16 @@ export default function App() {
                         <button
                           key={shelf}
                           onClick={() => loadShelfBooks(shelf)}
-                          className={`aspect-square flex items-center justify-center rounded-xl text-[11px] font-black transition-transform active:scale-95 ${
+                          className={`aspect-square flex flex-col items-center justify-center rounded-xl text-[11px] font-black transition-transform active:scale-95 ${
                             isSelected 
                               ? 'bg-accent text-white shadow-lg shadow-accent/40 ring-2 ring-accent ring-offset-2 ring-offset-slate-900' 
                               : 'bg-white/10 text-white/60 hover:bg-white/20'
                           }`}
                         >
-                          {shelf}
+                          <span className={isSelected ? 'text-white' : 'text-white/40'}>{shelf}</span>
+                          {isSelected && (
+                            <span className="text-[9px] font-bold mt-1 opacity-80">{shelfBooks.length}</span>
+                          )}
                         </button>
                       );
                     })}
