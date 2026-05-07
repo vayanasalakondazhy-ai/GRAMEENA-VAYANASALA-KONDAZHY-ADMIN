@@ -110,6 +110,27 @@ const Clock = React.memo(() => {
 export default function App() {
   const { status: dbStatus, errorMessage: dbError } = useSupabaseHealth();
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("");
+  const [globalSearchScope, setGlobalSearchScope] = useState<"books" | "members" | "financials">("books");
+  const [transactionSearch, setTransactionSearch] = useState("");
+
+  const handleGlobalSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!globalSearchQuery.trim()) return;
+
+    if (globalSearchScope === "books") {
+      setActiveTab("books");
+      setBookSearch(globalSearchQuery);
+      setSearchType("title");
+    } else if (globalSearchScope === "members") {
+      setActiveTab("members");
+      setMemberSearch(globalSearchQuery);
+    } else if (globalSearchScope === "financials") {
+      setActiveTab("financials");
+      setTransactionSearch(globalSearchQuery);
+    }
+    setGlobalSearchQuery("");
+  };
 
   const handleSetActiveTab = useCallback((tab: string) => {
     setActiveTab(tab);
@@ -3245,71 +3266,100 @@ export default function App() {
         <div className="absolute bottom-[-10%] left-[10%] w-[350px] h-[350px] bg-primary/5 rounded-full blur-[80px] animate-float pointer-events-none" style={{ animationDelay: '-3s' }}></div>
 
         <div className="relative z-10 p-8 flex flex-col gap-8 flex-grow">
-          <header className="flex justify-between items-center glass-card p-6 rounded-3xl border border-slate-200/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
-            <div className="flex items-center gap-5">
-              <motion.div 
-                whileHover={{ rotate: 15, scale: 1.1 }}
-                className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center text-white text-2xl shadow-xl shadow-primary/20 shrink-0"
-              >
-                🏛️
-              </motion.div>
-              <div className="text-left">
-                <h1 className="text-2xl font-black text-primary tracking-tighter leading-none mb-1">{t('portalSubtitle')}</h1>
-                <p className="text-[10px] text-text-muted font-black uppercase tracking-[0.2em] flex items-center gap-2">
-                  <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-500">REG NO: 1231</span>
-                  <span className="w-1.5 h-1.5 bg-slate-200 rounded-full"></span>
-                  <span className="opacity-60">{t('welcome')}</span>
-                </p>
+          <header className="glass-card p-6 rounded-3xl border border-slate-200/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col gap-6">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-5">
+                <motion.div 
+                  whileHover={{ rotate: 15, scale: 1.1 }}
+                  className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center text-white text-2xl shadow-xl shadow-primary/20 shrink-0"
+                >
+                  🏛️
+                </motion.div>
+                <div className="text-left">
+                  <h1 className="text-2xl font-black text-primary tracking-tighter leading-none mb-1">{t('portalSubtitle')}</h1>
+                  <p className="text-[10px] text-text-muted font-black uppercase tracking-[0.2em] flex items-center gap-2">
+                    <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-bold tracking-widest">REG NO: 1231</span>
+                    <span className="w-1.5 h-1.5 bg-slate-200 rounded-full"></span>
+                    <span className="opacity-60">{t('welcome')}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-6">
+                 <div className="flex bg-slate-100 p-1 rounded-xl">
+                   <button 
+                    onClick={() => setLang('en')}
+                    className={`px-3 py-1 rounded-lg text-[9px] font-black tracking-widest transition-all ${lang === 'en' ? 'bg-white text-primary shadow-sm' : 'text-slate-400'}`}
+                   >
+                     ENG
+                   </button>
+                   <button 
+                    onClick={() => setLang('ml')}
+                    className={`px-3 py-1 rounded-lg text-[9px] font-black tracking-widest transition-all ${lang === 'ml' ? 'bg-white text-primary shadow-sm' : 'text-slate-400'}`}
+                   >
+                     മലയ
+                   </button>
+                 </div>
+                 <div className="flex flex-col items-end">
+                    <div 
+                    onClick={() => {
+                      if (dbStatus === 'error') {
+                        Swal.fire({
+                          title: 'Database Connectivity Intel',
+                          text: dbError || 'Unknown connection fault.',
+                          icon: 'warning',
+                          confirmButtonColor: '#3b82f6',
+                          footer: '<p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center">Troubleshoot: Verify Secret Keys in AI Studio Settings.</p>'
+                        });
+                      }
+                    }}
+                    className={`db-status flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-black tracking-widest mb-2 transition-all ${
+                      dbStatus === 'connected' ? 'bg-emerald-50 text-emerald-700 border-emerald-100 cursor-help' : 
+                      dbStatus === 'checking' ? 'bg-amber-50 text-amber-700 border-amber-100 cursor-wait' :
+                      'bg-red-50 text-red-700 border-red-100 cursor-pointer animate-pulse hover:bg-red-100'
+                    }`}
+                    title={dbError || (dbStatus === 'connected' ? 'Sync Active' : 'Establishing Link...')}
+                  >
+                    <span className={`w-2 h-2 rounded-full animate-pulse ${
+                      dbStatus === 'connected' ? 'bg-emerald-500' : 
+                      dbStatus === 'checking' ? 'bg-amber-500' :
+                      'bg-red-500'
+                    }`}></span>
+                    {dbStatus === 'connected' ? t('dbOnline') : 
+                    dbStatus === 'checking' ? t('dbSyncing') :
+                    t('dbOffline')}
+                  </div>
+                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-6">
-               <div className="flex bg-slate-100 p-1 rounded-xl">
-                 <button 
-                  onClick={() => setLang('en')}
-                  className={`px-3 py-1 rounded-lg text-[9px] font-black tracking-widest transition-all ${lang === 'en' ? 'bg-white text-primary shadow-sm' : 'text-slate-400'}`}
-                 >
-                   ENG
-                 </button>
-                 <button 
-                  onClick={() => setLang('ml')}
-                  className={`px-3 py-1 rounded-lg text-[9px] font-black tracking-widest transition-all ${lang === 'ml' ? 'bg-white text-primary shadow-sm' : 'text-slate-400'}`}
-                 >
-                   മലയ
-                 </button>
-               </div>
-               <div className="flex flex-col items-end">
-                  <div 
-                  onClick={() => {
-                    if (dbStatus === 'error') {
-                      Swal.fire({
-                        title: 'Database Connectivity Intel',
-                        text: dbError || 'Unknown connection fault.',
-                        icon: 'warning',
-                        confirmButtonColor: '#3b82f6',
-                        footer: '<p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-center">Troubleshoot: Verify Secret Keys in AI Studio Settings.</p>'
-                      });
-                    }
-                  }}
-                  className={`db-status flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-black tracking-widest mb-2 transition-all ${
-                    dbStatus === 'connected' ? 'bg-emerald-50 text-emerald-700 border-emerald-100 cursor-help' : 
-                    dbStatus === 'checking' ? 'bg-amber-50 text-amber-700 border-amber-100 cursor-wait' :
-                    'bg-red-50 text-red-700 border-red-100 cursor-pointer animate-pulse hover:bg-red-100'
-                  }`}
-                  title={dbError || (dbStatus === 'connected' ? 'Sync Active' : 'Establishing Link...')}
+
+            {/* GLOBAL SEARCH BAR */}
+            <form onSubmit={handleGlobalSearch} className="w-full">
+              <div className="relative flex items-center bg-slate-50 border-2 border-slate-100 rounded-2xl overflow-hidden group focus-within:border-accent transition-all shadow-sm">
+                <select 
+                  value={globalSearchScope}
+                  onChange={(e) => setGlobalSearchScope(e.target.value as any)}
+                  className="bg-slate-100/50 text-[10px] font-black uppercase tracking-widest text-slate-500 px-5 py-4 border-r border-slate-200 outline-none cursor-pointer hover:bg-slate-200/50 transition-colors"
                 >
-                  <span className={`w-2 h-2 rounded-full animate-pulse ${
-                    dbStatus === 'connected' ? 'bg-emerald-500' : 
-                    dbStatus === 'checking' ? 'bg-amber-500' :
-                    'bg-red-500'
-                  }`}></span>
-                  {dbStatus === 'connected' ? t('dbOnline') : 
-                  dbStatus === 'checking' ? t('dbSyncing') :
-                  t('dbOffline')}
-                </div>
-                   <Clock />
-                </div>
+                  <option value="books">📚 Books</option>
+                  <option value="members">👤 Members</option>
+                  <option value="financials">💰 Finance</option>
+                </select>
+                <input 
+                  type="text"
+                  value={globalSearchQuery}
+                  onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                  placeholder={`Search database ${globalSearchScope === 'books' ? 'by Title, Author or Stock' : globalSearchScope === 'members' ? 'by Name, Phone or ID' : 'ledger notes'}...`}
+                  className="flex-grow bg-transparent px-6 py-4 text-xs font-bold text-slate-700 placeholder:text-slate-400 outline-none"
+                />
+                <button type="submit" className="px-8 py-4 bg-primary text-white font-black text-[10px] uppercase tracking-[0.2em] hover:bg-accent transition-all">
+                  Search Registry
+                </button>
               </div>
+            </form>
           </header>
+          <Clock />
+
           
           <AnimatePresence mode="wait">
             <motion.div
@@ -5810,29 +5860,54 @@ export default function App() {
                </div>
              </div>
 
-             <div className="section-card">
-               <div className="section-header flex justify-between items-center">
-                 <h2>Financial Circulation Log</h2>
-                 <button onClick={loadTransactions} className="text-xs font-black text-accent hover:underline uppercase tracking-widest">Force Audit Re-Sync</button>
-               </div>
-               <div className="overflow-x-auto">
-                 <table className="w-full">
-                   <thead>
-                     <tr>
-                       <th className="table-header">Timestamp</th>
-                       <th className="table-header">Member Identification</th>
-                       <th className="table-header">Class</th>
-                       <th className="table-header">Reference Notes</th>
-                       <th className="table-header text-right">Value</th>
-                     </tr>
-                   </thead>
-                   <tbody className="divide-y divide-slate-50">
-                     {transactions.length === 0 ? (
-                       <tr><td colSpan={5} className="py-20 text-center text-slate-300 italic">No financial strata detected. Ensure "transactions" table is provisioned.</td></tr>
-                     ) : (
-                       transactions.map(t => (
-                         <tr key={t.id} className="hover:bg-slate-50">
-                           <td className="table-cell font-mono text-[10px] text-slate-400">
+              <div className="section-card">
+                <div className="section-header flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div>
+                    <h2>Financial Circulation Log</h2>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Institutional Audit Trail</p>
+                  </div>
+                  <div className="flex items-center gap-3 w-full md:w-auto">
+                    <div className="relative flex-grow md:w-64">
+                      <input 
+                        type="text"
+                        placeholder="Filter Ledger..."
+                        value={transactionSearch}
+                        onChange={(e) => setTransactionSearch(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest outline-none focus:border-accent group transition-all"
+                      />
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 opacity-30 group-focus-within:opacity-100">🔍</span>
+                    </div>
+                    <button onClick={loadTransactions} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-400 hover:text-accent transition-all" title="Refresh Audit">🔄</button>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr>
+                        <th className="table-header text-left">Timestamp</th>
+                        <th className="table-header text-left">Member Identification</th>
+                        <th className="table-header text-left">Class</th>
+                        <th className="table-header text-left">Reference Notes</th>
+                        <th className="table-header text-right">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {transactions.filter(t => {
+                        const search = transactionSearch.toLowerCase();
+                        return (t.user_phone || "").toLowerCase().includes(search) || 
+                               (t.notes || "").toLowerCase().includes(search) ||
+                               (t.type || "").toLowerCase().includes(search);
+                      }).length === 0 ? (
+                        <tr><td colSpan={5} className="py-20 text-center text-slate-300 italic">No financial strata detected matching your query.</td></tr>
+                      ) : (
+                        transactions.filter(t => {
+                          const search = transactionSearch.toLowerCase();
+                          return (t.user_phone || "").toLowerCase().includes(search) || 
+                                 (t.notes || "").toLowerCase().includes(search) ||
+                                 (t.type || "").toLowerCase().includes(search);
+                        }).map(t => (
+                          <tr key={t.id} className="hover:bg-slate-50">
+                            <td className="table-cell font-mono text-[10px] text-slate-400">
                              {new Date(t.created_at).toLocaleString()}
                            </td>
                            <td className="table-cell">
