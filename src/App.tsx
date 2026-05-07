@@ -359,6 +359,8 @@ export default function App() {
   // Modal States
   const [editBookModal, setEditBookModal] = useState<any>(null);
   const [editMemberModal, setEditMemberModal] = useState<any>(null);
+  const [editVvMemberModal, setEditVvMemberModal] = useState<any>(null);
+  const [viewVvMemberModal, setViewVvMemberModal] = useState<any>(null);
   const [viewUserModal, setViewUserModal] = useState<any>(null);
   const [viewBookModal, setViewBookModal] = useState<any>(null);
   const [showIdCard, setShowIdCard] = useState<any>(null);
@@ -466,6 +468,46 @@ export default function App() {
       loadVvMembers();
     }
   };
+
+  const updateVvMember = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editVvMemberModal) return;
+    const form = e.target as HTMLFormElement;
+    const formData = new FormData(form);
+    const memberData = Object.fromEntries(formData.entries());
+
+    const { error } = await supabase.from("vayanavasantham_members").update(memberData).eq("id", editVvMemberModal.id);
+    if (error) {
+      Swal.fire("Update Failed", error.message, "error");
+    } else {
+      Swal.fire("Updated!", "Member record has been updated.", "success");
+      setEditVvMemberModal(null);
+      loadVvMembers();
+    }
+  };
+
+  const deleteVvMember = async (id: string) => {
+    const result = await Swal.fire({
+      title: "Delete Member?",
+      text: "This will permanently remove the member and all associated spatial data. Continue?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#dc2626",
+      cancelButtonColor: "#64748b",
+      confirmButtonText: "Yes, Delete Record"
+    });
+
+    if (result.isConfirmed) {
+      const { error } = await supabase.from("vayanavasantham_members").delete().eq("id", id);
+      if (error) {
+        Swal.fire("Deletion Failed", error.message, "error");
+      } else {
+        Swal.fire("Deleted", "Member record removed from system.", "success");
+        loadVvMembers();
+      }
+    }
+  };
+
   const [isImporting, setIsImporting] = useState(false);
   const [lang, setLang] = useState<"en" | "ml">("en");
   const [booksPage, setBooksPage] = useState(1);
@@ -4833,6 +4875,7 @@ export default function App() {
                         <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Contact</th>
                         <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400">Location/Route</th>
                         <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 text-right">Added</th>
+                        <th className="px-6 py-4 text-[10px] font-black uppercase text-slate-400 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -4855,11 +4898,36 @@ export default function App() {
                           <td className="px-6 py-4 text-right">
                             <div className="text-[10px] text-slate-400 font-mono">{new Date(m.created_at).toLocaleDateString()}</div>
                           </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button 
+                                onClick={() => setViewVvMemberModal(m)} 
+                                className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-100 transition-all shadow-sm"
+                                title="View Details"
+                              >
+                                👁️
+                              </button>
+                              <button 
+                                onClick={() => setEditVvMemberModal(m)} 
+                                className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center hover:bg-blue-100 transition-all shadow-sm"
+                                title="Edit Member"
+                              >
+                                ✏️
+                              </button>
+                              <button 
+                                onClick={() => deleteVvMember(m.id)} 
+                                className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center hover:bg-red-100 transition-all shadow-sm"
+                                title="Delete Member"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                       {vvMembers.length === 0 && (
                         <tr>
-                          <td colSpan={5} className="px-6 py-20 text-center text-slate-400 font-bold uppercase text-xs tracking-widest bg-slate-50/30">
+                          <td colSpan={6} className="px-6 py-20 text-center text-slate-400 font-bold uppercase text-xs tracking-widest bg-slate-50/30">
                             No project members found
                           </td>
                         </tr>
@@ -6879,6 +6947,164 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* VAYANAVASANTHAM EDIT MODAL */}
+      {editVvMemberModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            onClick={() => setEditVvMemberModal(null)}
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+          />
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            className="bg-white rounded-[40px] shadow-2xl w-full max-w-2xl relative z-10 overflow-hidden border border-slate-100"
+          >
+            <div className="bg-blue-900 p-8 text-left relative">
+              <div className="absolute top-0 right-0 p-8 opacity-10 text-6xl">✏️</div>
+              <h3 className="text-2xl font-black text-white tracking-tighter leading-tight">Edit Member Profile</h3>
+              <p className="text-[10px] text-blue-200/60 uppercase tracking-widest mt-2 font-bold">Updating {editVvMemberModal.full_name}</p>
+              <button 
+                onClick={() => setEditVvMemberModal(null)}
+                className="absolute top-6 right-6 w-8 h-8 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-all font-black"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={updateVvMember} className="p-8 grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto">
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Full Name</label>
+                <input name="full_name" defaultValue={editVvMemberModal.full_name} required className="input-field" placeholder="Legal Name" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Membership ID</label>
+                <input name="membership_id" defaultValue={editVvMemberModal.membership_id} required className="input-field font-mono" placeholder="VV-XXXX" />
+              </div>
+              <div className="col-span-full">
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Address</label>
+                <textarea name="address" defaultValue={editVvMemberModal.address} required className="input-field h-20 py-3" placeholder="Full residential details..." />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Phone Number</label>
+                <input name="phone" defaultValue={editVvMemberModal.phone} required className="input-field" placeholder="Primary Contact" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Age</label>
+                <input name="age" defaultValue={editVvMemberModal.age} type="number" className="input-field" placeholder="Years" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Educational Qualification</label>
+                <input name="education" defaultValue={editVvMemberModal.education} className="input-field" placeholder="B.Sc, MA, SSLC, etc" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Job / Occupation</label>
+                <input name="job" defaultValue={editVvMemberModal.job} className="input-field" placeholder="Profession" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Membership Granted Date</label>
+                <input name="membership_granted_date" defaultValue={editVvMemberModal.membership_granted_date} type="date" className="input-field" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Place</label>
+                <input name="place" defaultValue={editVvMemberModal.place} className="input-field" placeholder="Ward / Colony" />
+              </div>
+              <div className="col-span-full">
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-2 mb-1 block">Route</label>
+                <input name="route" defaultValue={editVvMemberModal.route} className="input-field" placeholder="Delivery Route Details" />
+              </div>
+              
+              <div className="col-span-full pt-4">
+                <button type="submit" className="w-full bg-blue-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-[11px] hover:bg-blue-800 transition-all shadow-xl shadow-blue-900/20">
+                  Update & Sync Record
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* VAYANAVASANTHAM VIEW MODAL */}
+      {viewVvMemberModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            onClick={() => setViewVvMemberModal(null)}
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+          />
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            className="bg-white rounded-[40px] shadow-2xl w-full max-w-lg relative z-10 overflow-hidden border border-slate-100"
+          >
+            <div className="bg-slate-900 p-8 text-center relative">
+              <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent"></div>
+              <div className="relative z-10">
+                <div className="w-20 h-20 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/20">
+                  <span className="text-4xl text-white">👤</span>
+                </div>
+                <h3 className="text-2xl font-black text-white tracking-tighter leading-tight">{viewVvMemberModal.full_name}</h3>
+                <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] mt-2 font-bold">{viewVvMemberModal.membership_id}</p>
+              </div>
+              <button 
+                onClick={() => setViewVvMemberModal(null)}
+                className="absolute top-6 right-6 w-8 h-8 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-all font-black text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Phone</p>
+                  <p className="text-xs font-bold text-slate-700">{viewVvMemberModal.phone}</p>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Occupation</p>
+                  <p className="text-xs font-bold text-slate-700">{viewVvMemberModal.job || '—'}</p>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Age</p>
+                  <p className="text-xs font-bold text-slate-700">{viewVvMemberModal.age} Years</p>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Joined</p>
+                  <p className="text-xs font-bold text-slate-700">{viewVvMemberModal.membership_granted_date || '—'}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100/50">
+                  <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-2">Residential Details</p>
+                  <p className="text-xs text-slate-600 leading-relaxed font-medium">{viewVvMemberModal.address}</p>
+                  <div className="mt-4 pt-4 border-t border-emerald-100/50 flex items-center gap-2">
+                    <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded uppercase">Location</span>
+                    <span className="text-xs font-bold text-slate-700">{viewVvMemberModal.place}, {viewVvMemberModal.route}</span>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100/50">
+                  <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">Education</p>
+                  <p className="text-xs font-bold text-slate-700">{viewVvMemberModal.education || '—'}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-8 pt-0 flex gap-3 text-left">
+              <button 
+                onClick={() => { setViewVvMemberModal(null); setEditVvMemberModal(viewVvMemberModal); }}
+                className="flex-1 bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-slate-900/20"
+              >
+                Modify Record
+              </button>
+            </div>
           </motion.div>
         </div>
       )}
