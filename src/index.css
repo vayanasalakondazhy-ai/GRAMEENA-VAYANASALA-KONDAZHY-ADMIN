@@ -84,6 +84,16 @@
   @apply bg-slate-300 rounded-full hover:bg-slate-400 transition-colors;
 }
 
+.thin-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+}
+
 /* Tab Transitions */
 .tab-content-enter {
   animation: tabFadeSlide 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
